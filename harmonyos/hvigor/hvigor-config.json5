@@ -1,0 +1,26 @@
+{
+  "modelVersion": "5.0.0",
+  "dependencies": {
+  },
+  "execution": {
+    "analyze": "normal",
+    "daemon": true,
+    "incremental": true,
+    "typeCheckMode": "TypeCheckMode.CompileTime",
+    "abcService": "AbcServiceContext.Normal"
+  },
+  "logging": {
+    "level": "info",
+    "showDate": true,
+    "showLevel": true,
+    "showSourcePosition": true
+  },
+  "debugging": {
+    "stackTrace": {
+      "logPrivateStackInfo": false
+    }
+  },
+  "jobs": {
+    "build": null
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "MUSE.AUDIO entry module (WebView shell)",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {}
+}

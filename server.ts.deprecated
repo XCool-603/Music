@@ -1,0 +1,895 @@
+import express, { Request, Response } from 'express';
+import path from 'path';
+import { createServer as createViteServer } from 'vite';
+
+const app = express();
+const PORT = 3000;
+
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// CORS middleware for internal API
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Range');
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+    return;
+  }
+  next();
+});
+
+// Health check endpoint
+app.get('/api/health', (req: Request, res: Response) => {
+  res.json({ status: 'ok', timestamp: Date.now() });
+});
+
+// Helper function to stream an upstream audio URL with Range / 206 support directly
+async function pipeAudioStream(targetUrl: string, referer: string, req: Request, res: Response) {
+  try {
+    const rangeHeader = req.headers.range;
+    const fetchHeaders: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+      Accept: '*/*',
+      Referer: referer,
+    };
+
+    if (rangeHeader) {
+      fetchHeaders['Range'] = rangeHeader;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+
+    const upstreamResponse = await fetch(targetUrl, {
+      method: 'GET',
+      headers: fetchHeaders,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    res.status(upstreamResponse.status);
+
+    const contentType = upstreamResponse.headers.get('content-type') || 'audio/mpeg';
+    const contentLength = upstreamResponse.headers.get('content-length');
+    const contentRange = upstreamResponse.headers.get('content-range');
+    const acceptRanges = upstreamResponse.headers.get('accept-ranges') || 'bytes';
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Accept-Ranges', acceptRanges);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+
+    if (contentLength) res.setHeader('Content-Length', contentLength);
+    if (contentRange) res.setHeader('Content-Range', contentRange);
+
+    if (!upstreamResponse.body) {
+      res.end();
+      return;
+    }
+
+    const reader = upstreamResponse.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(Buffer.from(value));
+    }
+    res.end();
+  } catch (err: any) {
+    console.error(`[Audio Pipe Error] ${targetUrl}:`, err?.message);
+    if (!res.headersSent) {
+      res.status(502).send('Audio pipe error');
+    }
+  }
+}
+
+// Helper: fetch with timeout
+async function fetchWithTimeout(url: string, opts: RequestInit = {}, timeoutMs = 10000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Helper: search with retry
+async function searchWithRetry(fn: () => Promise<any[]>, retries = 2, delayMs = 800): Promise<any[]> {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      if (i < retries) {
+        await new Promise(r => setTimeout(r, delayMs));
+      } else {
+        return [];
+      }
+    }
+  }
+  return [];
+}
+
+// Helper function to search Kuwo
+async function searchKuwoMusic(query: string, page = 1, limit = 25) {
+  return searchWithRetry(async () => {
+    const pn = Math.max(0, page - 1);
+    const kwSearchUrl = `http://search.kuwo.cn/r.s?client=kt&all=${encodeURIComponent(
+      query
+    )}&pn=${pn}&rn=${limit}&uid=794764098&ver=kwplayer_ar_9.2.2.1&vipver=1&show_copyright_off=1&newsearch=1&ft=music&cluster=0&strategy=2012&encoding=utf8&rformat=json&vermerge=1&mobi=1`;
+
+    const fetchRes = await fetchWithTimeout(kwSearchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+    }, 8000);
+
+    if (!fetchRes.ok) {
+      console.log('[Kuwo Search] HTTP', fetchRes.status, fetchRes.statusText);
+      return [];
+    }
+
+    const rawText = await fetchRes.text();
+    let json: any = null;
+    try {
+      json = JSON.parse(rawText);
+    } catch {
+      const clean = rawText.replace(/'/g, '"');
+      try {
+        json = JSON.parse(clean);
+      } catch {
+        console.log('[Kuwo Search] JSON parse failed, response length:', rawText.length);
+        return [];
+      }
+    }
+
+    const items = json?.abslist || [];
+    return items.map((item: any) => {
+      const rid = (item.MUSICRID || '').replace('MUSIC_', '');
+      let coverUrl = 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&auto=format&fit=crop&q=80';
+      if (item.web_albumpic_short) {
+        let picShort = String(item.web_albumpic_short);
+        if (picShort.startsWith('120/')) picShort = picShort.replace('120/', '500/');
+        else if (!picShort.startsWith('500/') && !picShort.startsWith('http')) picShort = `500/${picShort}`;
+        coverUrl = picShort.startsWith('http') ? picShort.replace('http://', 'https://') : `https://img4.kuwo.cn/star/albumcover/${picShort}`;
+      } else if (item.hts_MVPIC) {
+        coverUrl = String(item.hts_MVPIC).replace('http://', 'https://');
+      } else if (item.web_artistpic_short) {
+        let artShort = String(item.web_artistpic_short);
+        if (artShort.startsWith('120/')) artShort = artShort.replace('120/', '240/');
+        coverUrl = artShort.startsWith('http') ? artShort.replace('http://', 'https://') : `https://img4.kuwo.cn/star/starheads/${artShort}`;
+      }
+
+      const duration = parseInt(item.DURATION || '240', 10);
+      return {
+        id: `kw_${rid}`,
+        rid: rid,
+        title: item.SONGNAME || '未知单曲',
+        artist: item.ARTIST || '未知歌手',
+        album: item.ALBUM || '单曲合辑',
+        duration: duration > 0 ? duration : 240,
+        coverUrl,
+        audioUrl: `/api/music/stream?source=kuwo&id=${rid}&rid=${rid}`,
+        genre: item.GENRE || '流行音乐',
+        bitrate: '酷我正版 FLAC / 320k',
+        sourceName: '酷我音乐',
+        sourceKey: 'kw',
+        sourceRawInfo: {
+          id: rid,
+          songmid: rid,
+          name: item.SONGNAME,
+          singer: item.ARTIST,
+          albumName: item.ALBUM,
+          interval: duration > 0 ? duration : 240,
+          img: coverUrl,
+        },
+      };
+    });
+  });
+}
+
+// In-memory cache for resolved NetEase album covers
+const netEaseCoverCache = new Map<string, string>();
+
+// Helper function to search NetEase
+async function searchNetEaseMusic(query: string, page = 1, limit = 25) {
+  return searchWithRetry(async () => {
+    const neSearchUrl = `https://music-api.gdstudio.xyz/api.php?types=search&count=${limit}&source=netease&pages=${page}&name=${encodeURIComponent(
+      query
+    )}`;
+
+    const fetchRes = await fetchWithTimeout(neSearchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+      },
+    }, 8000);
+
+    if (!fetchRes.ok) {
+      console.log('[NetEase Search] HTTP', fetchRes.status, fetchRes.statusText);
+      return [];
+    }
+
+    const json = await fetchRes.json();
+    if (!Array.isArray(json)) return [];
+
+    return json.map((item: any) => {
+      const id = String(item.id);
+      const artist = Array.isArray(item.artist) ? item.artist.join(' / ') : (item.artist || '未知歌手');
+      const picId = item.pic_id || id;
+      const coverUrl = `/api/music/cover?source=netease&id=${picId}`;
+
+      return {
+        id: `ne_${id}`,
+        rid: id,
+        title: item.name || '未知单曲',
+        artist: artist,
+        album: item.album || '单曲合辑',
+        duration: 240,
+        coverUrl: coverUrl,
+        audioUrl: `/api/music/stream?source=netease&id=${id}`,
+        genre: '流行音乐',
+        bitrate: '无损全长 FLAC / 320k',
+        sourceName: '网易云音乐',
+        sourceKey: 'wy',
+        sourceRawInfo: {
+          id: id,
+          songmid: id,
+          name: item.name,
+          singer: artist,
+          albumName: item.album,
+          interval: 240,
+          img: coverUrl,
+        },
+      };
+    });
+  });
+}
+
+// Universal cover image proxy endpoint
+app.get('/api/music/cover', async (req: Request, res: Response) => {
+  const source = (req.query.source as string || '').toLowerCase().trim();
+  const id = (req.query.id as string || '').trim();
+  const rawUrl = (req.query.url as string || '').trim();
+
+  const defaultFallback = 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&auto=format&fit=crop&q=80';
+
+  if (source === 'netease' || source === 'wy') {
+    if (id) {
+      if (netEaseCoverCache.has(id)) {
+        res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+        res.redirect(302, netEaseCoverCache.get(id)!);
+        return;
+      }
+
+      try {
+        const picApi = `https://music-api.gdstudio.xyz/api.php?types=pic&id=${id}&source=netease`;
+        const apiRes = await fetchWithTimeout(picApi, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+        }, 8000);
+        const data: any = await apiRes.json();
+        if (data && data.url && typeof data.url === 'string') {
+          const finalUrl = data.url.replace('http://', 'https://');
+          netEaseCoverCache.set(id, finalUrl);
+          res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+          res.redirect(302, finalUrl);
+          return;
+        }
+      } catch (err) {
+        console.warn('[Cover Proxy Error] NetEase cover resolve failed for id:', id);
+      }
+    }
+  }
+
+  if (rawUrl) {
+    if (rawUrl.includes('music-api.gdstudio.xyz/api.php?types=pic')) {
+      const matchId = rawUrl.match(/id=([^&]+)/);
+      const picId = matchId ? matchId[1] : '';
+      if (picId) {
+        try {
+          const apiRes = await fetchWithTimeout(rawUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+          }, 8000);
+          const data: any = await apiRes.json();
+          if (data && data.url) {
+            res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+            res.redirect(302, data.url.replace('http://', 'https://'));
+            return;
+          }
+        } catch (e) {}
+      }
+    }
+
+    const safeUrl = rawUrl.replace('http://', 'https://');
+    res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+    res.redirect(302, safeUrl);
+    return;
+  }
+
+  res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+  res.redirect(302, defaultFallback);
+});
+
+// Dedicated full-length online music search & stream resolver API
+app.get('/api/music/search', async (req: Request, res: Response) => {
+  const query = (req.query.q as string || '').trim();
+  const page = parseInt(req.query.page as string || '1', 10);
+  const limit = parseInt(req.query.limit as string || '25', 10);
+  const platform = ((req.query.source as string || req.query.platform as string || 'all') as string).toLowerCase().trim();
+
+  if (!query) {
+    res.json({ list: [], total: 0 });
+    return;
+  }
+
+  // 1. Single platform requests
+  if (platform === 'kuwo' || platform === 'kw') {
+    const kwList = await searchKuwoMusic(query, page, limit);
+    res.json({ list: kwList, total: kwList.length, source: 'kuwo' });
+    return;
+  }
+
+  if (platform === 'netease' || platform === 'wy') {
+    const neList = await searchNetEaseMusic(query, page, limit);
+    res.json({ list: neList, total: neList.length, source: 'netease' });
+    return;
+  }
+
+  // 2. Multi-Platform Aggregation (Concurrent Search Kuwo + NetEase)
+  try {
+    const [kwResult, neResult] = await Promise.allSettled([
+      searchKuwoMusic(query, page, limit),
+      searchNetEaseMusic(query, page, limit),
+    ]);
+
+    const kwResults = kwResult.status === 'fulfilled' ? kwResult.value : [];
+    const neResults = neResult.status === 'fulfilled' ? neResult.value : [];
+    const sourceStatus: Record<string, string> = {};
+    if (kwResult.status === 'rejected') sourceStatus.kuwo = 'error';
+    else sourceStatus.kuwo = kwResults.length > 0 ? 'ok' : 'empty';
+    if (neResult.status === 'rejected') sourceStatus.netease = 'error';
+    else sourceStatus.netease = neResults.length > 0 ? 'ok' : 'empty';
+
+    const qLower = query.toLowerCase();
+
+    const allCandidates = [...kwResults, ...neResults];
+    allCandidates.sort((a, b) => {
+      const aArtistMatch = a.artist && (qLower.includes(a.artist.toLowerCase()) || a.artist.toLowerCase().includes(qLower));
+      const bArtistMatch = b.artist && (qLower.includes(b.artist.toLowerCase()) || b.artist.toLowerCase().includes(qLower));
+      const aTitleMatch = a.title && qLower.includes(a.title.toLowerCase());
+      const bTitleMatch = b.title && qLower.includes(b.title.toLowerCase());
+
+      const aScore = (aArtistMatch ? 2 : 0) + (aTitleMatch ? 1 : 0);
+      const bScore = (bArtistMatch ? 2 : 0) + (bTitleMatch ? 1 : 0);
+
+      if (aScore !== bScore) return bScore - aScore;
+      return 0;
+    });
+
+    const combined: any[] = [];
+    const seen = new Set<string>();
+
+    for (const track of allCandidates) {
+      const key = `${track.title.toLowerCase()} - ${track.artist.toLowerCase()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        combined.push(track);
+      }
+    }
+
+    res.json({ list: combined.slice(0, limit), total: combined.length, source: 'all', sourceStatus });
+  } catch (err: any) {
+    console.error('[Aggregated Music Search Error]:', err?.message);
+    res.json({ list: [], total: 0, sourceStatus: { kuwo: 'error', netease: 'error' } });
+  }
+});
+
+// Full-length stream resolution and direct media pipe (No 302 redirect!)
+app.get('/api/music/stream', async (req: Request, res: Response) => {
+  const source = (req.query.source as string || '').toLowerCase().trim();
+  const id = (req.query.id as string || '').trim();
+  const rid = (req.query.rid as string || id).trim();
+
+  if (!id && !rid) {
+    res.status(400).send('Missing id/rid');
+    return;
+  }
+
+  // 1. Handle Kuwo Stream Resolution (Jay Chou, Classic Pop, lossless VIP CDN)
+  if (source === 'kuwo' || source === 'kw' || (!source && rid)) {
+    const kuwoCandidates = [
+      `https://musicapi.haitangw.net/music/kw.php?type=mp3&id=${rid}&level=standard`,
+      `http://music.nxinxz.com/kw.php?id=${rid}&level=standard&type=mp3`,
+      `http://antiserver.kuwo.cn/anti.s?type=convert_url&rid=${rid}&format=mp3&response=url`,
+    ];
+
+    for (const candUrl of kuwoCandidates) {
+      try {
+        const streamTest = await fetchWithTimeout(candUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+          redirect: 'follow',
+        }, 8000);
+        if (streamTest.ok) {
+          const contentType = streamTest.headers.get('content-type') || '';
+          if (contentType.includes('audio') || contentType.includes('octet-stream') || streamTest.status === 200) {
+            await pipeAudioStream(streamTest.url || candUrl, 'http://www.kuwo.cn/', req, res);
+            return;
+          }
+        }
+      } catch (err: any) {
+        console.log('[Kuwo stream candidate failed]:', candUrl, err?.message);
+      }
+    }
+  }
+
+  // 2. Handle NetEase Lossless Resolution
+  if (source === 'netease' || source === 'wy' || id) {
+    const neCandidates = [
+      `https://music-api.gdstudio.xyz/api.php?types=url&id=${id || rid}&source=netease`,
+      `http://music.nxinxz.com/wy.php?id=${id || rid}&level=standard&type=mp3`,
+    ];
+
+    for (const candUrl of neCandidates) {
+      try {
+        if (candUrl.includes('gdstudio')) {
+          const upstreamRes = await fetchWithTimeout(candUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+          }, 8000);
+          const uData = await upstreamRes.json();
+          if (uData && uData.url && uData.url.startsWith('http')) {
+            await pipeAudioStream(uData.url, 'https://music.163.com/', req, res);
+            return;
+          }
+        } else {
+          const streamTest = await fetchWithTimeout(candUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+            redirect: 'follow',
+          }, 8000);
+          if (streamTest.ok) {
+            await pipeAudioStream(streamTest.url || candUrl, 'https://music.163.com/', req, res);
+            return;
+          }
+        }
+      } catch (err: any) {
+        console.log('[NetEase stream candidate failed]:', candUrl, err?.message);
+      }
+    }
+  }
+
+  res.status(404).send('Audio stream not available');
+});
+
+// Full-length LRC lyrics resolution
+app.get('/api/music/lyric', async (req: Request, res: Response) => {
+  const source = (req.query.source as string || '').toLowerCase().trim();
+  const id = (req.query.id as string || '').trim();
+  const rid = (req.query.rid as string || id).trim();
+
+  if (!id && !rid) {
+    res.json({ lrc: '' });
+    return;
+  }
+
+  // Kuwo Lyric
+  if (source === 'kuwo' || source === 'kw') {
+    try {
+      const lrcUrl = `https://music-api.gdstudio.xyz/api.php?types=lyric&id=${rid}&source=kuwo`;
+      const fetchRes = await fetchWithTimeout(lrcUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+      }, 8000);
+      const json = await fetchRes.json();
+      if (json && json.lyric) {
+        res.json({ lrc: json.lyric, tlyric: json.tlyric || '' });
+        return;
+      }
+    } catch (e: any) {
+      console.log('[Kuwo Lyric Error]:', e?.message);
+    }
+  }
+
+  // NetEase Lyric
+  if (source === 'netease' || source === 'wy' || id) {
+    try {
+      const lrcUrl = `https://music-api.gdstudio.xyz/api.php?types=lyric&id=${id || rid}&source=netease`;
+      const fetchRes = await fetchWithTimeout(lrcUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+      }, 8000);
+      const json = await fetchRes.json();
+      if (json && json.lyric) {
+        res.json({ lrc: json.lyric, tlyric: json.tlyric || '' });
+        return;
+      }
+    } catch (err: any) {
+      console.log('[NetEase Lyric Error]:', err?.message);
+    }
+  }
+
+  // Kuwo Lyric fallback
+  if (rid) {
+    try {
+      const lrcUrl = `https://music-api.gdstudio.xyz/api.php?types=lyric&id=${rid}&source=kuwo`;
+      const fetchRes = await fetchWithTimeout(lrcUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+      }, 8000);
+      const json = await fetchRes.json();
+      if (json && json.lyric) {
+        res.json({ lrc: json.lyric, tlyric: json.tlyric || '' });
+        return;
+      }
+    } catch (err: any) {
+      console.log('[Kuwo Lyric Fallback Error]:', err?.message);
+    }
+  }
+
+  res.json({ lrc: '' });
+});
+
+// 1. Universal HTTP request proxy for JS source scripts (bypasses browser CORS & header restrictions)
+app.post('/api/proxy/request', async (req: Request, res: Response) => {
+  const { url, method = 'GET', headers = {}, body, form } = req.body;
+
+  if (!url || typeof url !== 'string') {
+    res.status(400).json({ error: 'Missing or invalid "url" parameter' });
+    return;
+  }
+
+  try {
+    const fetchHeaders: Record<string, string> = {
+      'User-Agent':
+        headers['User-Agent'] ||
+        headers['user-agent'] ||
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+      Accept: headers['Accept'] || headers['accept'] || '*/*',
+      ...headers,
+    };
+
+    // Remove host header if accidentally passed
+    delete fetchHeaders['host'];
+    delete fetchHeaders['Host'];
+
+    let requestBody: any = undefined;
+    if (body) {
+      requestBody = typeof body === 'string' ? body : JSON.stringify(body);
+      if (!fetchHeaders['Content-Type'] && !fetchHeaders['content-type']) {
+        fetchHeaders['Content-Type'] = 'application/json';
+      }
+    } else if (form) {
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(form)) {
+        params.append(k, String(v));
+      }
+      requestBody = params.toString();
+      fetchHeaders['Content-Type'] = 'application/x-www-form-urlencoded';
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+
+    const response = await fetch(url, {
+      method: method.toUpperCase(),
+      headers: fetchHeaders,
+      body: ['GET', 'HEAD'].includes(method.toUpperCase()) ? undefined : requestBody,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    const responseText = await response.text();
+    let responseBody: any = responseText;
+    try {
+      responseBody = JSON.parse(responseText);
+    } catch {
+      // Keep as text
+    }
+
+    const resHeaders: Record<string, string> = {};
+    response.headers.forEach((val, key) => {
+      resHeaders[key] = val;
+    });
+
+    res.status(200).json({
+      statusCode: response.status,
+      headers: resHeaders,
+      body: responseBody,
+    });
+  } catch (err: any) {
+    console.error(`[Proxy Request Error] URL: ${url}`, err?.message);
+    res.status(200).json({
+      statusCode: 500,
+      headers: {},
+      body: null,
+      error: err?.message || 'Proxy fetch failed',
+    });
+  }
+});
+
+// 2. Universal Audio Stream Proxy (Handles Range requests, CORS, anti-hotlink Referer, and http->https upgrade)
+app.get('/api/proxy/audio', async (req: Request, res: Response) => {
+  const targetUrl = req.query.url as string;
+  const customReferer = req.query.referer as string;
+  const customUa = req.query.ua as string;
+
+  if (!targetUrl) {
+    res.status(400).send('Missing "url" query parameter');
+    return;
+  }
+
+  try {
+    const rangeHeader = req.headers.range;
+    const fetchHeaders: Record<string, string> = {
+      'User-Agent':
+        customUa ||
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+      Accept: '*/*',
+    };
+
+    if (customReferer) {
+      fetchHeaders['Referer'] = customReferer;
+    } else if (targetUrl.includes('qq.com')) {
+      fetchHeaders['Referer'] = 'https://y.qq.com/';
+    } else if (targetUrl.includes('163.com') || targetUrl.includes('126.net')) {
+      fetchHeaders['Referer'] = 'https://music.163.com/';
+    } else if (targetUrl.includes('kugou.com')) {
+      fetchHeaders['Referer'] = 'https://www.kugou.com/';
+    } else if (targetUrl.includes('kuwo.cn')) {
+      fetchHeaders['Referer'] = 'https://www.kuwo.cn/';
+    }
+
+    if (rangeHeader) {
+      fetchHeaders['Range'] = rangeHeader;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    const upstreamResponse = await fetch(targetUrl, {
+      method: 'GET',
+      headers: fetchHeaders,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    // Forward status code (200 or 206 Partial Content)
+    res.status(upstreamResponse.status);
+
+    // Forward essential media headers
+    const contentType = upstreamResponse.headers.get('content-type') || 'audio/mpeg';
+    const contentLength = upstreamResponse.headers.get('content-length');
+    const contentRange = upstreamResponse.headers.get('content-range');
+    const acceptRanges = upstreamResponse.headers.get('accept-ranges') || 'bytes';
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Accept-Ranges', acceptRanges);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+
+    if (contentLength) {
+      res.setHeader('Content-Length', contentLength);
+    }
+    if (contentRange) {
+      res.setHeader('Content-Range', contentRange);
+    }
+
+    if (!upstreamResponse.body) {
+      res.end();
+      return;
+    }
+
+    // Stream the web stream to express response
+    const reader = upstreamResponse.body.getReader();
+    const pump = async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(Buffer.from(value));
+        }
+        res.end();
+      } catch (streamErr) {
+        res.end();
+      }
+    };
+    pump();
+  } catch (err: any) {
+    console.error(`[Audio Proxy Error] ${targetUrl}:`, err?.message);
+    if (!res.headersSent) {
+      res.status(502).send(`Audio proxy failed: ${err?.message}`);
+    }
+  }
+});
+
+// 3. Dedicated Music File Downloader with Content-Disposition attachment header
+app.get('/api/music/download', async (req: Request, res: Response) => {
+  let targetUrl = (req.query.url as string || '').trim();
+  const source = (req.query.source as string || '').toLowerCase().trim();
+  const id = (req.query.id as string || '').trim();
+  const rid = (req.query.rid as string || id).trim();
+  let filename = (req.query.filename as string || 'music.mp3').trim();
+
+  // Sanitize filename to avoid invalid characters
+  filename = filename.replace(/[\\/:*?"<>|]/g, '_');
+  if (!filename.toLowerCase().endsWith('.mp3') && !filename.toLowerCase().endsWith('.flac') && !filename.toLowerCase().endsWith('.m4a') && !filename.toLowerCase().endsWith('.wav')) {
+    filename += '.mp3';
+  }
+
+  // If direct stream URL was not provided or is relative /api/music/stream, resolve real upstream stream
+  if (!targetUrl || targetUrl.startsWith('/api/music/stream')) {
+    if (source === 'kuwo' || source === 'kw' || (!source && rid)) {
+      const kuwoCandidates = [
+        `https://musicapi.haitangw.net/music/kw.php?type=mp3&id=${rid}&level=standard`,
+        `http://music.nxinxz.com/kw.php?id=${rid}&level=standard&type=mp3`,
+        `http://antiserver.kuwo.cn/anti.s?type=convert_url&rid=${rid}&format=mp3&response=url`,
+      ];
+      for (const candUrl of kuwoCandidates) {
+        try {
+          const streamTest = await fetchWithTimeout(candUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+            redirect: 'follow',
+          }, 8000);
+          if (streamTest.ok) {
+            targetUrl = streamTest.url || candUrl;
+            break;
+          }
+        } catch (e) {}
+      }
+    } else if (source === 'netease' || source === 'wy' || id) {
+      const neCandidates = [
+        `https://music-api.gdstudio.xyz/api.php?types=url&id=${id || rid}&source=netease`,
+        `http://music.nxinxz.com/wy.php?id=${id || rid}&level=standard&type=mp3`,
+      ];
+      for (const candUrl of neCandidates) {
+        try {
+          if (candUrl.includes('gdstudio')) {
+            const upstreamRes = await fetchWithTimeout(candUrl, {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+            }, 8000);
+            const uData = await upstreamRes.json();
+            if (uData && uData.url && uData.url.startsWith('http')) {
+              targetUrl = uData.url;
+              break;
+            }
+          } else {
+            const streamTest = await fetchWithTimeout(candUrl, {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+              redirect: 'follow',
+            }, 8000);
+            if (streamTest.ok) {
+              targetUrl = streamTest.url || candUrl;
+              break;
+            }
+          }
+        } catch (e) {}
+      }
+    }
+  }
+
+  if (!targetUrl) {
+    res.status(400).send('Unable to resolve audio download stream URL');
+    return;
+  }
+
+  try {
+    const fetchHeaders: Record<string, string> = {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+      Accept: '*/*',
+    };
+
+    if (targetUrl.includes('kuwo.cn')) {
+      fetchHeaders['Referer'] = 'https://www.kuwo.cn/';
+    } else if (targetUrl.includes('163.com') || targetUrl.includes('126.net')) {
+      fetchHeaders['Referer'] = 'https://music.163.com/';
+    } else if (targetUrl.includes('qq.com')) {
+      fetchHeaders['Referer'] = 'https://y.qq.com/';
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+
+    const upstreamResponse = await fetch(targetUrl, {
+      method: 'GET',
+      headers: fetchHeaders,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!upstreamResponse.ok) {
+      res.status(upstreamResponse.status).send('Upstream download server returned error');
+      return;
+    }
+
+    const contentType = upstreamResponse.headers.get('content-type') || 'audio/mpeg';
+    const contentLength = upstreamResponse.headers.get('content-length');
+
+    const encodedFilename = encodeURIComponent(filename);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodedFilename}"; filename*=UTF-8''${encodedFilename}`);
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (contentLength) {
+      res.setHeader('Content-Length', contentLength);
+    }
+
+    if (!upstreamResponse.body) {
+      res.end();
+      return;
+    }
+
+    const reader = upstreamResponse.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(Buffer.from(value));
+    }
+    res.end();
+  } catch (err: any) {
+    console.error(`[Download Error] ${targetUrl}:`, err?.message);
+    if (!res.headersSent) {
+      res.status(500).send(`Download failed: ${err?.message}`);
+    }
+  }
+});
+
+// 4. Dedicated LRC Lyrics File Downloader
+app.get('/api/music/download/lrc', async (req: Request, res: Response) => {
+  const source = (req.query.source as string || '').toLowerCase().trim();
+  const id = (req.query.id as string || '').trim();
+  const rid = (req.query.rid as string || id).trim();
+  let filename = (req.query.filename as string || 'lyrics.lrc').trim();
+  const rawLrc = (req.query.raw as string || '').trim();
+
+  filename = filename.replace(/[\\/:*?"<>|]/g, '_');
+  if (!filename.toLowerCase().endsWith('.lrc')) {
+    filename += '.lrc';
+  }
+
+  const encodedFilename = encodeURIComponent(filename);
+  res.setHeader('Content-Disposition', `attachment; filename="${encodedFilename}"; filename*=UTF-8''${encodedFilename}`);
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  if (rawLrc) {
+    res.send(rawLrc);
+    return;
+  }
+
+  if (rid || id) {
+    try {
+      const lyricUrl = `https://music-api.gdstudio.xyz/api.php?types=lyric&id=${rid || id}&source=${source === 'netease' || source === 'wy' ? 'netease' : 'kuwo'}`;
+      const fetchRes = await fetchWithTimeout(lyricUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+      }, 8000);
+      const json = await fetchRes.json();
+      if (json && json.lyric) {
+        res.send(json.lyric);
+        return;
+      }
+    } catch (e) {}
+  }
+
+  res.send(`[00:00.00]${filename.replace('.lrc', '')}\n[00:01.00]Wavesound Music Player\n`);
+});
+
+async function startServer() {
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req: Request, res: Response) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
+
+startServer();

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="referrer" content="no-referrer" />
+    <title>MUSE.AUDIO - 自适应Hi-Fi音乐播放器</title>
+    <meta name="description" content="支持桌面端、平板与移动端自适应的高保真音乐播放器，具备实时频谱可视化、LRC动态同步歌词与10段EQ均衡器。" />
+
+    <!-- PWA -->
+    <link rel="manifest" href="./manifest.json" />
+    <meta name="theme-color" content="#6366f1" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="MUSE.AUDIO" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="./icons/favicon-16.png" />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="MUSE.AUDIO - 自适应Hi-Fi音乐播放器" />
+    <meta property="og:description" content="多端自适应高保真音乐播放器" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="./icons/icon-512.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- Capacitor / iOS safe area -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <style>
+      body { margin: 0; padding: 0; background: #0a0a0f; }
+      @supports (padding: env(safe-area-inset-top)) {
+        body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+      }
+    </style>
+    <script type="module" crossorigin src="/music/assets/index-DN_LlbpE.js"></script>
+    <link rel="stylesheet" crossorigin href="/music/assets/index-Bp60a0KT.css">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      if ('serviceWorker' in navigator && !window.__TAURI_INTERNALS__) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./sw.js').catch(() => {});
+        });
+      }
+    </script>
+  </body>
+</html>

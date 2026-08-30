@@ -1,0 +1,6 @@
+{
+  "name": "自适应音乐播放器",
+  "description": "支持桌面端、平板与移动端多端自适应的高保真音乐播放器，全面兼容洛雪音乐 (LX Music) 自定义音源 JS 脚本导入、高品质音乐/歌词/封面一键下载、实时音频流与动态歌词解析，具备实时频谱可视化、LRC动态同步歌词、10段专业DSP/EQ均衡器与播放列表管理功能。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

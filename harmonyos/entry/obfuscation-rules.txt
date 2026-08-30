@@ -1,0 +1,2 @@
+# Define project specific obfuscation rules here.
+# For more details on the obfuscation, see https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/source-obfuscation

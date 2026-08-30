@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MUSE.AUDIO - Hi-Fi音乐播放器</title>
+<link rel="icon" type="image/svg+xml" href="/music/icons/icon.svg">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0f;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",Helvetica,Arial,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.bg-orb{position:fixed;border-radius:50%;filter:blur(120px);pointer-events:none;z-index:0}
+.bg-orb-1{width:500px;height:500px;background:rgba(99,102,241,0.15);top:-10%;left:10%}
+.bg-orb-2{width:600px;height:600px;background:rgba(16,185,129,0.08);bottom:-5%;right:5%}
+.bg-orb-3{width:400px;height:400px;background:rgba(217,70,239,0.1);top:30%;right:-8%}
+.container{position:relative;z-index:1;text-align:center;padding:2rem 1.25rem;max-width:640px;width:100%}
+.logo{width:80px;height:80px;margin:0 auto 1.5rem;border-radius:20px;overflow:hidden;box-shadow:0 0 40px rgba(99,102,241,0.3)}
+.logo img{width:100%;height:100%;object-fit:cover}
+h1{font-size:2rem;font-weight:700;background:linear-gradient(135deg,#818cf8,#6ee7b7);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:0.5rem}
+.subtitle{color:#94a3b8;font-size:0.95rem;margin-bottom:2.5rem;line-height:1.7}
+.web-btn{display:inline-flex;align-items:center;justify-content:center;gap:0.5rem;padding:0.875rem 2rem;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;font-size:1rem;font-weight:600;border-radius:12px;text-decoration:none;transition:all 0.3s;box-shadow:0 4px 24px rgba(99,102,241,0.4);margin-bottom:2.5rem}
+.web-btn:hover{transform:translateY(-2px);box-shadow:0 8px 32px rgba(99,102,241,0.5)}
+.web-btn svg{width:20px;height:20px}
+.divider{display:flex;align-items:center;gap:1rem;margin-bottom:1.75rem}
+.divider::before,.divider::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,transparent,#334155,transparent)}
+.divider span{color:#64748b;font-size:0.8rem;white-space:nowrap}
+.downloads{display:grid;grid-template-columns:repeat(3,1fr);gap:0.75rem}
+.download-card{display:flex;flex-direction:column;align-items:center;gap:0.5rem;padding:1.35rem 0.5rem;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:12px;text-decoration:none;color:#cbd5e1;transition:all 0.25s;cursor:pointer}
+.download-card:not(.disabled):hover{background:rgba(99,102,241,0.1);border-color:rgba(99,102,241,0.3);transform:translateY(-2px)}
+.download-card.disabled{opacity:0.4;cursor:default;pointer-events:none}
+.download-card .icon{width:34px;height:34px;display:flex;align-items:center;justify-content:center;margin-bottom:0.2rem;border-radius:10px;background:rgba(255,255,255,0.04);color:#a5b4fc}
+.download-card .icon svg{width:22px;height:22px}
+.download-card .name{font-size:0.82rem;font-weight:600;color:#e2e8f0}
+.download-card .tag{font-size:0.65rem;padding:0.15rem 0.55rem;border-radius:999px;background:rgba(99,102,241,0.15);color:#a5b4fc}
+.download-card .tag.ready{background:rgba(16,185,129,0.15);color:#6ee7b7}
+.download-card .tag.soon{background:rgba(148,163,184,0.1);color:#94a3b8}
+footer{margin-top:3rem;color:#475569;font-size:0.75rem}
+@media(max-width:480px){
+  .downloads{grid-template-columns:repeat(2,1fr)}
+  h1{font-size:1.5rem}
+}
+</style>
+</head>
+<body>
+<div class="bg-orb bg-orb-1"></div>
+<div class="bg-orb bg-orb-2"></div>
+<div class="bg-orb bg-orb-3"></div>
+
+<div class="container">
+  <div class="logo">
+    <img src="/music/icons/icon.svg" alt="MUSE.AUDIO">
+  </div>
+  <h1>MUSE.AUDIO</h1>
+  <p class="subtitle">自适应 Hi-Fi 音乐播放器<br>实时频谱可视化 · LRC 动态歌词 · 10 段 EQ 均衡器</p>
+
+  <a href="/music/" class="web-btn">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+    网页版在线使用
+  </a>
+
+  <div class="divider"><span>下载客户端</span></div>
+
+  <div class="downloads">
+    <a class="download-card" href="http://dxcool.cn:9000/music/android/muse-audio-1.0.0-arm64-signed.apk" target="_blank" rel="noopener">
+      <span class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l14-6"/><path d="M4.5 9.5l1.5 8a2 2 0 0 0 2 1.5h8a2 2 0 0 0 2-1.5l1.5-8"/><path d="M7 5.5c.5-1 1.5-2 3-2.5 2.5-1 4.5-.5 6 .5"/></svg>
+      </span>
+      <span class="name">Android</span>
+      <span class="tag ready">立即下载</span>
+    </a>
+    <div class="download-card disabled">
+      <span class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
+      </span>
+      <span class="name">iOS</span>
+      <span class="tag soon">即将推出</span>
+    </div>
+    <div class="download-card disabled">
+      <span class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+      </span>
+      <span class="name">HarmonyOS</span>
+      <span class="tag soon">即将推出</span>
+    </div>
+    <a class="download-card" href="http://dxcool.cn:9000/music/windows/muse-audio.exe" target="_blank" rel="noopener">
+      <span class="icon">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5v5h8v-8H5.5A2.5 2.5 0 0 0 3 5.5zM13 3v7.5h8V5.5A2.5 2.5 0 0 0 18.5 3zM3 13v5.5A2.5 2.5 0 0 0 5.5 21H11v-8zM13 13v8h5.5a2.5 2.5 0 0 0 2.5-2.5V13z"/></svg>
+      </span>
+      <span class="name">Windows</span>
+      <span class="tag ready">立即下载</span>
+    </a>
+    <div class="download-card disabled">
+      <span class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>
+      </span>
+      <span class="name">Linux</span>
+      <span class="tag soon">即将推出</span>
+    </div>
+    <div class="download-card disabled">
+      <span class="icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c2 2 2 3.5 2 5a2 2 0 0 1-2 2 2 2 0 0 1-2-2c0-1.5 0-3 2-5z"/><path d="M6 15c-1-1.5-1.5-4 1-6 2.5-2 8-2 10.5 0 2.5 2 2 4.5 1 6-1 1.5-2.5 3-3.5 4.5-.5.8-.5 1.5 0 2.5"/><path d="M18 15c1-1.5 1.5-4-1-6"/></svg>
+      </span>
+      <span class="name">macOS</span>
+      <span class="tag soon">即将推出</span>
+    </div>
+  </div>
+
+  <footer>MUSE.AUDIO &copy; 2026</footer>
+</div>
+</body>
+</html>

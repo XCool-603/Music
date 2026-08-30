@@ -1,0 +1,30 @@
+node_modules/
+builds/
+dist/
+dist-tauri/
+publish/
+src-tauri/target/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# IDE / workspace
+.idea/
+.vs/
+*.suo
+*.user
+
+# Secrets (never commit signing keystores)
+*.jks
+*.keystore
+*.p12
+*.pfx
+
+# Build outputs (regenerated)
+**/bin/
+**/obj/
+**/wwwroot/music/assets/
+background/publish-linux-x64/
+

@@ -1,0 +1,13 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "muse-audio",
+  "version": "1.0.0",
+  "description": "MUSE.AUDIO - Adaptive Hi-Fi music player (HarmonyOS NEXT WebView shell)",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {},
+  "devDependencies": {
+    "@ohos/hypium": "1.0.19"
+  }
+}

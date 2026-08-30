@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Allow audio playback while the app is in the background. -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>audio</string>
+    </array>
+
+    <!-- The backend API is plain HTTP (http://dxcool.cn:3001). Permit it. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+
+    <!-- Privacy string shown when the system asks about microphone access. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Used for music search and voice recognition.</string>
+</dict>
+</plist>

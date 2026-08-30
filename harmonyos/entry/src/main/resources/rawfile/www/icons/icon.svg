@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+    <linearGradient id="headphone" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e0e7ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+  <!-- Headphone band -->
+  <path d="M156 280 C156 190 200 136 256 136 C312 136 356 190 356 280" 
+        stroke="url(#headphone)" stroke-width="28" fill="none" stroke-linecap="round"/>
+  <!-- Left ear cup -->
+  <rect x="120" y="260" width="56" height="80" rx="16" fill="url(#headphone)"/>
+  <!-- Right ear cup -->
+  <rect x="336" y="260" width="56" height="80" rx="16" fill="url(#headphone)"/>
+  <!-- Sound wave left -->
+  <path d="M190 300 Q210 270 230 300 Q210 330 190 300Z" fill="#ffffff" opacity="0.6"/>
+  <!-- Sound wave right -->
+  <path d="M282 300 Q302 270 322 300 Q302 330 282 300Z" fill="#ffffff" opacity="0.6"/>
+  <!-- Center music note -->
+  <circle cx="256" cy="300" r="14" fill="#ffffff"/>
+  <rect x="268" y="280" width="4" height="30" rx="2" fill="#ffffff"/>
+  <path d="M272 280 Q284 274 280 286" fill="#ffffff"/>
+</svg>

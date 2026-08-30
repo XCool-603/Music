@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "MUSE.AUDIO 自适应音频播放器"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "MUSE.AUDIO 主界面"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "MUSE.AUDIO"
+    }
+  ]
+}

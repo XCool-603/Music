@@ -1,0 +1,165 @@
+@import "tailwindcss";
+
+/* === Global Custom Scrollbar === */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(16, 185, 129, 0.55);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Utility: thin scrollbar (already referenced in app) */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+  border: 1.5px solid transparent;
+  background-clip: padding-box;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(16, 185, 129, 0.55);
+  background-clip: padding-box;
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* === Global Custom Range Slider === */
+input[type="range"] {
+  --slider-accent: #10b981;
+  --slider-accent-hi: #6366f1;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  height: 20px;
+  outline: none;
+}
+
+/* Track (WebKit / Blink) */
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    var(--slider-accent) 0%,
+    var(--slider-accent-hi) var(--slider-fill, 40%),
+    rgba(255, 255, 255, 0.12) var(--slider-fill, 40%),
+    rgba(255, 255, 255, 0.12) 100%
+  );
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+/* Thumb (WebKit / Blink) */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid var(--slider-accent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--slider-accent) 25%, transparent),
+    0 2px 6px rgba(0, 0, 0, 0.45);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+input[type="range"]:hover::-webkit-slider-thumb,
+input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.25);
+  box-shadow:
+    0 0 0 6px color-mix(in srgb, var(--slider-accent) 28%, transparent),
+    0 0 14px color-mix(in srgb, var(--slider-accent) 70%, transparent);
+}
+
+/* Track (Firefox) */
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+input[type="range"]::-moz-range-progress {
+  height: 6px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, var(--slider-accent), var(--slider-accent-hi));
+}
+
+/* Thumb (Firefox) */
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid var(--slider-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--slider-accent) 25%, transparent), 0 2px 6px rgba(0, 0, 0, 0.45);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+input[type="range"]:hover::-moz-range-thumb,
+input[type="range"]:active::-moz-range-thumb {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--slider-accent) 28%, transparent), 0 0 14px color-mix(in srgb, var(--slider-accent) 70%, transparent);
+}
+
+input[type="range"]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--slider-accent) 60%, transparent);
+  outline-offset: 4px;
+  border-radius: 9999px;
+}
+
+/* Map Tailwind accent-* classes to the custom slider accent color */
+input[type="range"].accent-emerald-500 { --slider-accent: #10b981; }
+input[type="range"].accent-navy-500 { --slider-accent: #2563eb; }
+input[type="range"].accent-blue-500 { --slider-accent: #3b82f6; }
+input[type="range"].accent-purple-500 { --slider-accent: #a855f7; }
+input[type="range"].accent-pink-500 { --slider-accent: #ec4899; }
+input[type="range"].accent-violet-500 { --slider-accent: #8b5cf6; }
+input[type="range"].accent-indigo-500 { --slider-accent: #6366f1; }
+input[type="range"].accent-cyan-400,
+input[type="range"].accent-cyan-500 { --slider-accent: #22d3ee; }
+input[type="range"].accent-amber-400,
+input[type="range"].accent-amber-500 { --slider-accent: #f59e0b; }
