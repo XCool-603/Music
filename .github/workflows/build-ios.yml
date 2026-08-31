@@ -93,7 +93,7 @@ jobs:
       - name: Build iOS (simulator, no signing)
         if: inputs.target != 'device'
         run: |
-          npx tauri ios build --target aarch64-apple-ios-sim
+          npx tauri ios build --target aarch64-sim
 
       - name: Build iOS device .ipa (signed)
         if: inputs.target == 'device'
