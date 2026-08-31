@@ -7,7 +7,7 @@
     "frontendDist": "../dist-tauri",
     "devUrl": "http://localhost:3000",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "node scripts/build-tauri-frontend.cjs"
   },
   "app": {
     "windows": [
