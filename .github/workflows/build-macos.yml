@@ -1,0 +1,95 @@
+# =============================================================================
+#  macOS 打包 (Tauri 2)
+#
+#  触发:
+#    - 手动触发 (workflow_dispatch) —— 在 GitHub Actions 页面点 "Run workflow"
+#    - 推分支 / 打 tag 时(可按需取消注释)
+#
+#  产物:
+#    - .app (通用架构 universal)
+#    - .dmg (可选)
+#
+#  ⚠️ 首次使用前需要在 GitHub 仓库设置 Secrets:
+#     (Settings -> Secrets and variables -> Actions -> New repository secret)
+#
+#  可选签名/公证 Secrets(不设置也能构建,只是产出的 .app/.dmg 未签名):
+#    APPLE_CERTIFICATE          -> 开发者证书 .p12 的 base64 内容
+#    APPLE_CERTIFICATE_PASSWORD -> .p12 的密码
+#    APPLE_ID                   -> 你的 Apple ID(用于公证 notarization)
+#    APPLE_APP_PASSWORD         -> Apple ID 专用密码(App-specific password)
+#    APPLE_TEAM_ID              -> 开发者 Team ID
+# =============================================================================
+
+name: Build macOS
+
+on:
+  workflow_dispatch:
+  # push:
+  #   tags:
+  #     - 'v*'
+  # pull_request:
+
+jobs:
+  build-macos:
+    name: macOS universal
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: |
+            aarch64-apple-darwin
+            x86_64-apple-darwin
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      # 可选:导入 Apple 证书用于签名。未设置 Secret 时跳过 → 产出未签名包
+      - name: Import Apple Developer certificate (signing)
+        if: env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_IMPORT: build.keychain
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "" "$KEYCHAIN_IMPORT"
+          security default-keychain -s "$KEYCHAIN_IMPORT"
+          security unlock-keychain -p "" "$KEYCHAIN_IMPORT"
+          security import certificate.p12 -k "$KEYCHAIN_IMPORT" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN_IMPORT"
+          security list-keychains -d user -s "$KEYCHAIN_IMPORT"
+
+      - name: Build app bundle (universal)
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm run build:mac
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: muse-audio-macos
+          path: |
+            src-tauri/target/universal-apple-darwin/release/bundle/**/*.dmg
+            src-tauri/target/universal-apple-darwin/release/bundle/**/*.app
+          if-no-files-found: warn
