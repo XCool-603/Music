@@ -82,7 +82,14 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # 未配置 Apple 证书时使用 ad-hoc 签名(signingIdentity="-" ),
+        # 避免 tauri 尝试导入不存在的证书而报 "failed to import keychain certificate"。
+        # 配置了证书时,交由上面 Import 步骤 + 系统 keychain 正常签名。
         run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "No Apple certificate configured -> using ad-hoc signing"
+            export APPLE_SIGNING_IDENTITY="-"
+          fi
           npm run build:mac
 
       - name: Upload macOS artifacts
