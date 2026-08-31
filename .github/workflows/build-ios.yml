@@ -95,14 +95,12 @@ jobs:
         run: |
           npx tauri ios build --target aarch64-sim
 
-      - name: Build iOS device .ipa (signed)
+      - name: Build iOS device .ipa (unsigned)
         if: inputs.target == 'device'
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_PROFILE: ${{ secrets.APPLE_PROFILE }}
+        # 用 --no-sign 产出未签名 .ipa,windows 上用爱思助手等工具
+        # 以免费 Apple ID 签名后导入真机。
         run: |
-          npx tauri ios build --ci --minified
+          npx tauri ios build --ci --no-sign
 
       - name: Upload iOS artifacts
         uses: actions/upload-artifact@v4
