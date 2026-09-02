@@ -10,6 +10,7 @@ import {
   CustomSourceScript,
 } from './types';
 import { audioEngine, EQ_PRESETS } from './utils/audioEngine';
+import { setPlaybackState } from './utils/nativeAudio';
 import { apiUrl } from './utils/apiBase';
 import {
   parseScriptMetadata,
@@ -517,6 +518,109 @@ export default function App() {
     }
   }, [isPlaying, currentTrack]);
 
+  // Native background-audio bridge (iOS): activate AVAudioSession playback,
+  // keep lock-screen Now Playing metadata in sync. No-op in browser/desktop.
+  useEffect(() => {
+    setPlaybackState({
+      playing: isPlaying,
+      title: currentTrack?.title ?? 'MUSE.AUDIO',
+      artist: currentTrack?.artist ?? '',
+      album: currentTrack?.album ?? undefined,
+      duration: duration > 0 ? duration : undefined,
+      position: currentTime,
+      streamUrl: currentTrack?.audioUrl ?? undefined,
+    });
+  }, [isPlaying, currentTrack, duration, currentTime]);
+
+  // Navigation back-stack tracking (for the edge-swipe back gesture).
+  const locationRef = useRef(location);
+  locationRef.current = location;
+  const navStackRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    const key = location.pathname + location.search;
+    const s = navStackRef.current;
+    if (s[s.length - 1] !== key) {
+      s.push(key);
+      if (s.length > 50) s.splice(0, s.length - 50);
+    }
+  }, [location]);
+
+  // Edge-swipe back gesture for touch devices (iOS style). Closes the
+  // full-screen player first; otherwise navigates back in app history, or to
+  // the home page when there is nothing to go back to.
+  useEffect(() => {
+    if (!window.matchMedia?.('(pointer: coarse)')?.matches) return;
+
+    const g = { active: false, decided: false, back: false, startX: 0, startY: 0, startT: 0 };
+
+    const onDown = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch' || e.clientX > 28) return;
+      g.active = true;
+      g.decided = false;
+      g.back = false;
+      g.startX = e.clientX;
+      g.startY = e.clientY;
+      g.startT = performance.now();
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!g.active || e.pointerType !== 'touch') return;
+      if (g.decided) {
+        if (g.back) {
+          try { e.preventDefault(); } catch { /* noop */ }
+        }
+        return;
+      }
+      const dx = e.clientX - g.startX;
+      const dy = e.clientY - g.startY;
+      if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return;
+      if (dx > 0 && dx > Math.abs(dy) * 1.15) {
+        g.decided = true;
+        g.back = true;
+        try { e.preventDefault(); } catch { /* noop */ }
+      } else {
+        g.decided = true;
+        g.back = false;
+      }
+    };
+    const onUp = (e: PointerEvent) => {
+      if (!g.active) return;
+      g.active = false;
+      if (!g.back) return;
+      const dx = e.clientX - g.startX;
+      const dt = performance.now() - g.startT;
+      if (dx < 55 && !(dx >= 40 && dt < 260)) return;
+
+      if (isFullScreenPlayerOpen) {
+        setIsFullScreenPlayerOpen(false);
+        return;
+      }
+      const cur = locationRef.current.pathname + locationRef.current.search;
+      const s = navStackRef.current;
+      const idx = s.lastIndexOf(cur);
+      if (idx > 0) {
+        s.length = idx;
+        navigate(-1);
+      } else if (locationRef.current.pathname !== '/') {
+        navigate('/', { replace: true });
+      }
+    };
+    const onCancel = () => {
+      g.active = false;
+    };
+
+    window.addEventListener('pointerdown', onDown, { passive: false });
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    return () => {
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
+  }, [isFullScreenPlayerOpen, setIsFullScreenPlayerOpen, navigate]);
+
   // Play / Pause Toggle
   const handleTogglePlay = () => {
     if (!currentTrack) {
@@ -752,7 +856,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen w-screen bg-[#08080c] text-slate-100 flex flex-col font-sans antialiased overflow-hidden select-none relative">
+    <div className="h-screen w-screen bg-[#08080c] text-slate-100 flex flex-col font-sans antialiased overflow-hidden select-none relative pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Ambient Frosted Background Glowing Orbs */}
       <div className="absolute top-[-10%] left-[10%] w-[450px] h-[450px] bg-indigo-600/20 rounded-full blur-[130px] pointer-events-none -z-0" />
       <div className="absolute bottom-[-5%] right-[5%] w-[550px] h-[550px] bg-emerald-500/10 rounded-full blur-[150px] pointer-events-none -z-0" />

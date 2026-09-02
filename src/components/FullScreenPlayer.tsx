@@ -112,7 +112,7 @@ export const FullScreenPlayer: React.FC<FullScreenPlayerProps> = ({
   const speedOptions = [0.75, 1.0, 1.25, 1.5, 2.0];
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[#08080c] text-slate-100 animate-in slide-in-from-bottom-5 duration-300 overflow-hidden">
+    <div className="fixed inset-0 z-50 flex flex-col bg-[#08080c] text-slate-100 animate-in slide-in-from-bottom-5 duration-300 overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Background Dynamic Ambient Blur */}
       <div
         className="absolute inset-0 bg-cover bg-center blur-3xl opacity-30 scale-125 transition-all duration-1000 -z-10"

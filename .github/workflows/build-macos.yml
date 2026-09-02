@@ -60,7 +60,7 @@ jobs:
 
       # 可选:导入 Apple 证书用于签名。未设置 Secret 时跳过 → 产出未签名包
       - name: Import Apple Developer certificate (signing)
-        if: env.APPLE_CERTIFICATE != ''
+        if: secrets.APPLE_CERTIFICATE != ''
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -82,13 +82,16 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # 未配置 Apple 证书时使用 ad-hoc 签名(signingIdentity="-" ),
-        # 避免 tauri 尝试导入不存在的证书而报 "failed to import keychain certificate"。
-        # 配置了证书时,交由上面 Import 步骤 + 系统 keychain 正常签名。
+        # 未配置 Apple 证书时:
+        #   - 使用 ad-hoc 签名(signingIdentity="-"),不依赖 Apple 证书
+        #   - 必须 unset 掉空的 APPLE_CERTIFICATE/… 环境变量,否则 Tauri 仍会尝试
+        #     导入这个"存在但为空"的证书而报 "failed to import keychain certificate"。
+        # 配置了证书时,由上面 Import 步骤导入 + 系统 keychain 正常签名。
         run: |
           if [ -z "$APPLE_CERTIFICATE" ]; then
             echo "No Apple certificate configured -> using ad-hoc signing"
             export APPLE_SIGNING_IDENTITY="-"
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD
           fi
           npm run build:mac
 

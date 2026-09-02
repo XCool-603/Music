@@ -12,13 +12,38 @@ fn set_keep_alive(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn set_playback_state(
+    app: tauri::AppHandle,
+    playing: bool,
+    title: Option<String>,
+    artist: Option<String>,
+    album: Option<String>,
+    duration: f64,
+    position: f64,
+    stream_url: Option<String>,
+) -> Result<(), String> {
+    tauri_plugin_native_audio::set_playback_state(
+        &app,
+        playing,
+        title.as_deref(),
+        artist.as_deref(),
+        album.as_deref(),
+        duration,
+        position,
+        stream_url.as_deref(),
+    )
+    .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     println!("[MUSE-AUDIO] rust run() start");
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![set_keep_alive])
-        .plugin(tauri_plugin_keepawake::init());
+        .invoke_handler(tauri::generate_handler![set_keep_alive, set_playback_state])
+        .plugin(tauri_plugin_keepawake::init())
+        .plugin(tauri_plugin_native_audio::init());
     #[cfg(mobile)]
     {
         builder = builder.setup(|app| {

@@ -17,9 +17,11 @@ export function getApiBase(): string {
   const isLoopback =
     host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
 
-  // Vite dev server proxies /api -> localhost:3001.
+  // Vite dev server proxies /api -> remote backend (dxcool.cn:3001).
+  // Return empty base so relative /api/* requests are proxied by Vite,
+  // which avoids assuming a local backend on :3001.
   if (isLoopback && window.location.port === '3000') {
-    return 'http://localhost:3001';
+    return '';
   }
 
   // Packaged shell (Tauri custom protocol, in-app local web server, Capacitor,

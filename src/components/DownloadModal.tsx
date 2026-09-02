@@ -133,9 +133,12 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in duration-200">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in duration-200"
+      onClick={onClose}
+    >
       <div
-        className="relative w-full max-w-lg bg-neutral-900/95 border border-white/15 rounded-3xl p-6 sm:p-7 text-slate-100 shadow-2xl overflow-hidden"
+        className="relative w-full max-w-lg bg-neutral-900/95 border border-white/15 rounded-3xl p-6 sm:p-7 text-slate-100 shadow-2xl overflow-y-auto max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Background Ambient Glow */}

@@ -3,6 +3,7 @@ builds/
 dist/
 dist-tauri/
 publish/
+api-publish2/
 src-tauri/target/
 coverage/
 .DS_Store
