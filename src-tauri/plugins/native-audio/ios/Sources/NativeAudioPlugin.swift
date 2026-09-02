@@ -7,6 +7,7 @@ import Foundation
 import MediaPlayer
 import Tauri
 import UIKit
+import os
 
 /// Native playback engine for MUSE.AUDIO (iOS).
 ///
@@ -17,6 +18,10 @@ import UIKit
 /// `MPRemoteCommandCenter` controls. Progress ticks and the "track ended"
 /// signal are streamed back to the frontend over a Tauri `Channel`.
 public class NativeAudioPlugin: Plugin {
+
+  private static let log = Logger(
+    subsystem: "com.dxcool.museaudio", category: "native-audio"
+  )
 
   private let player = AVPlayer()
   private var sink: Channel?
@@ -37,6 +42,7 @@ public class NativeAudioPlugin: Plugin {
 
   public override init() {
     super.init()
+    Self.log.info("init: NativeAudioPlugin created")
     observeInterruptions()
     setupRemoteCommands()
     errorObserver = NotificationCenter.default.addObserver(
@@ -69,6 +75,7 @@ public class NativeAudioPlugin: Plugin {
     if let errorObserver = errorObserver {
       NotificationCenter.default.removeObserver(errorObserver)
     }
+    Self.log.info("deinit: NativeAudioPlugin released")
   }
 
   // MARK: - JS -> Native commands
@@ -117,10 +124,12 @@ public class NativeAudioPlugin: Plugin {
     do {
       let args = try invoke.parseArgs(Args.self)
       guard let url = URL(string: args.url) else {
+        Self.log.error("setSource: invalid URL \(args.url, privacy: .public)")
         invoke.reject("Invalid audio URL")
         return
       }
 
+      Self.log.info("setSource: loading \(args.url, privacy: .public) pos=\(args.position ?? 0, format: .fixed(precision: 1))")
       let item = AVPlayerItem(url: url)
       registerEndObserver(for: item)
       player.replaceCurrentItem(with: item)
@@ -149,6 +158,7 @@ public class NativeAudioPlugin: Plugin {
   /// WKWebView process alive so channel events keep flowing while backgrounded.
   @objc public func play(_ invoke: Invoke) {
     guard player.currentItem != nil else {
+      Self.log.error("play: no source loaded")
       invoke.reject("No source loaded")
       return
     }
@@ -156,12 +166,14 @@ public class NativeAudioPlugin: Plugin {
     player.play()
     player.rate = playbackRate
     isPlaying = true
+    Self.log.info("play: AVPlayer started rate=\(self.playbackRate, format: .fixed(precision: 2))")
     updateNowPlaying(position: player.currentTime().seconds)
     invoke.resolve()
   }
 
   /// Pause playback and release the audio session (so other apps can resume).
   @objc public func pause(_ invoke: Invoke) {
+    Self.log.info("pause: pausing native playback")
     pauseNativePlayback()
     invoke.resolve()
   }
@@ -221,6 +233,7 @@ public class NativeAudioPlugin: Plugin {
     do {
       let args = try invoke.parseArgs(Args.self)
       self.sink = args.channel
+      Self.log.info("registerSink: back-channel registered")
       invoke.resolve()
     } catch {
       invoke.reject("registerSink failed: \(error.localizedDescription)")
@@ -234,7 +247,9 @@ public class NativeAudioPlugin: Plugin {
     do {
       try session.setCategory(.playback, mode: .default)
       try session.setActive(true)
+      Self.log.info("activateSession: category=.playback active=true")
     } catch {
+      Self.log.error("activateSession: failed \(error, privacy: .public)")
       print("[MUSE-AUDIO][native-audio] failed to activate audio session: \(error)")
     }
   }

@@ -551,8 +551,15 @@ export default function App() {
         audioEngine.setNativeMode(false);
       },
     }).then((ok) => {
-      if (ok) audioEngine.setNativeMode(true);
-    }).catch(() => {});
+      if (ok) {
+        audioEngine.setNativeMode(true);
+        console.log('[App] native playback ENGAGED (AVPlayer) — background playback active');
+      } else {
+        console.warn('[App] native playback unavailable — using HTML5 audio (background may stop)');
+      }
+    }).catch((e) => {
+      console.warn('[App] initNativePlayback threw:', e);
+    });
   }, [handleTrackEnded]);
 
   // Navigation back-stack tracking (for the edge-swipe back gesture).
