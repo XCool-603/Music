@@ -1,26 +1,17 @@
 {
   "modelVersion": "5.0.0",
   "dependencies": {
+    "@ohos/hvigor-ohos-plugin": "5.0.13.200"
   },
   "execution": {
     "analyze": "normal",
     "daemon": true,
-    "incremental": true,
-    "typeCheckMode": "TypeCheckMode.CompileTime",
-    "abcService": "AbcServiceContext.Normal"
+    "incremental": false
   },
   "logging": {
     "level": "info",
     "showDate": true,
     "showLevel": true,
     "showSourcePosition": true
-  },
-  "debugging": {
-    "stackTrace": {
-      "logPrivateStackInfo": false
-    }
-  },
-  "jobs": {
-    "build": null
   }
 }

@@ -56,7 +56,7 @@ jobs:
         working-directory: harmonyos
         run: |
           hvigorw clean --no-daemon --accept-license
-          hvigorw assembleHap --mode module -p product=default -p buildMode=release --no-daemon --accept-license
+          hvigorw assembleHap --mode module -p product=default -p buildMode=release --no-daemon --accept-license --stacktrace
 
       - name: Verify HAP outputs
         shell: bash
