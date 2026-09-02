@@ -10,7 +10,7 @@ import {
   CustomSourceScript,
 } from './types';
 import { audioEngine, EQ_PRESETS } from './utils/audioEngine';
-import { setPlaybackState, initNativePlayback } from './utils/nativeAudio';
+import { setPlaybackState, initNativePlayback, isNativePlayback } from './utils/nativeAudio';
 import { getNativeSnapshot } from './utils/nativeAudio';
 import { apiUrl } from './utils/apiBase';
 import {
@@ -576,6 +576,52 @@ export default function App() {
     });
   }, [handleTrackEnded]);
 
+  // Web Media Session API — enables background playback on PWA / Safari standalone
+  // and shows lock-screen / notification media controls on supported browsers.
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    if (isNativePlayback()) return; // native AVPlayer handles its own session
+
+    if (currentTrack) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentTrack.title,
+        artist: currentTrack.artist,
+        album: currentTrack.album || undefined,
+        artwork: currentTrack.coverUrl
+          ? [{ src: currentTrack.coverUrl, sizes: '512x512', type: 'image/jpeg' }]
+          : [],
+      });
+    }
+
+    navigator.mediaSession.setActionHandler('play', () => {
+      audioEngine.play();
+      setIsPlaying(true);
+    });
+    navigator.mediaSession.setActionHandler('pause', () => {
+      audioEngine.pause();
+      setIsPlaying(false);
+    });
+    navigator.mediaSession.setActionHandler('nexttrack', () => handleNextRef.current());
+    navigator.mediaSession.setActionHandler('previoustrack', () => handlePrevRef.current());
+    navigator.mediaSession.setActionHandler('seekto', (e) => {
+      if (e.seekTime != null) audioEngine.seek(e.seekTime);
+    });
+    navigator.mediaSession.setActionHandler('seekbackward', (e) => {
+      const offset = e.seekOffset || 10;
+      audioEngine.seek(Math.max(0, audioEngine.getCurrentTime() - offset));
+    });
+    navigator.mediaSession.setActionHandler('seekforward', (e) => {
+      const offset = e.seekOffset || 10;
+      audioEngine.seek(audioEngine.getCurrentTime() + offset);
+    });
+  }, [currentTrack]);
+
+  // Keep Media Session playbackState in sync.
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+  }, [isPlaying]);
+
   // Navigation back-stack tracking (for the edge-swipe back gesture).
   const locationRef = useRef(location);
   locationRef.current = location;
@@ -907,12 +953,6 @@ export default function App() {
 
   return (
     <div className="h-screen w-screen bg-[#08080c] text-slate-100 flex flex-col font-sans antialiased overflow-hidden select-none relative pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-      {/* Debug backend banner (temporary; remove after iOS background audio is verified) */}
-      {nativeDiag && (
-        <div className="absolute top-1 left-1 z-50 px-2 py-0.5 rounded text-[10px] font-bold pointer-events-none" style={{ backgroundColor: nativeDiag.engaged ? 'rgba(16,185,129,0.85)' : 'rgba(244,63,94,0.85)', color: '#fff' }}>
-          {nativeDiag.engaged ? `AVP ▸ ${nativeDiag.ticks}s` : 'HTML5 *'}
-        </div>
-      )}
       {/* Ambient Frosted Background Glowing Orbs */}
       <div className="absolute top-[-10%] left-[10%] w-[450px] h-[450px] bg-indigo-600/20 rounded-full blur-[130px] pointer-events-none -z-0" />
       <div className="absolute bottom-[-5%] right-[5%] w-[550px] h-[550px] bg-emerald-500/10 rounded-full blur-[150px] pointer-events-none -z-0" />
