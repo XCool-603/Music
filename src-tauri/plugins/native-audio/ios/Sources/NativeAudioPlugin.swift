@@ -351,12 +351,12 @@ public class NativeAudioPlugin: Plugin {
     }
 
     commands.nextTrackCommand.addTarget { [weak self] _ in
-      self?.sendEvent(type: "remote", command: "next", position: nil, duration: 0, playing: false)
+      self?.sendEvent(type: "remote", playing: false, position: nil, duration: 0, command: "next")
       return .success
     }
 
     commands.previousTrackCommand.addTarget { [weak self] _ in
-      self?.sendEvent(type: "remote", command: "prev", position: nil, duration: 0, playing: false)
+      self?.sendEvent(type: "remote", playing: false, position: nil, duration: 0, command: "prev")
       return .success
     }
 
@@ -383,7 +383,7 @@ public class NativeAudioPlugin: Plugin {
     ) { [weak self] note in
       guard let self = self,
         let userInfo = note.userInfo,
-        let raw = userInfo[AVAudioSession.interruptionTypeKey] as? UInt,
+        let raw = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
         let type = AVAudioSession.InterruptionType(rawValue: raw)
       else { return }
 
@@ -399,7 +399,7 @@ public class NativeAudioPlugin: Plugin {
         )
       case .ended:
         let shouldResume =
-          userInfo[AVAudioSession.interruptionOptionKey] as? UInt
+          userInfo[AVAudioSessionInterruptionOptionKey] as? UInt
           == AVAudioSession.InterruptionOptions.shouldResume.rawValue
         if shouldResume && self.shouldResumeAfterInterruption {
           self.activateSession()
