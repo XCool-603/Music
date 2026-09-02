@@ -46,6 +46,7 @@ jobs:
           cache: true
 
       - name: Verify environment
+        working-directory: harmonyos
         run: |
           hvigorw -v
           ohpm -v
