@@ -32,10 +32,9 @@
 ```bash
 npm run tauri:macos:init   # 生成 src-tauri/gen/apple 的 macOS 工程
 npm run tauri:ios:init     # 生成 iOS 工程
-bash plugins/native-audio/ios/install.sh  # 将原生音频插件注册到 Xcode 工程
 ```
 > 生成前会确认 bundle id（`com.dxcool.museaudio`）。生成后可改用 Xcode 打开 `gen/apple/<product>.xcodeproj`。
-> `install.sh` 会把 `NativeAudioPlugin.swift` 拷贝到 Xcode 工程并注册到 Sources 构建阶段，**必须**在 `tauri ios init` 之后执行。
+> native-audio 插件的 iOS Swift 包通过其 `build.rs` 中的 `.ios_path("ios")` 自动被发现并链接，`tauri ios init` 会自动处理。
 
 ### 2. 构建 macOS（未签名/本地签名）
 ```bash

@@ -67,10 +67,6 @@ jobs:
       - name: Generate Xcode project (first init)
         run: npx tauri ios init --ci
 
-      - name: Install native-audio iOS plugin into Xcode project
-        working-directory: src-tauri
-        run: bash plugins/native-audio/ios/install.sh
-
       # ---- 真机签名:导入证书 + 描述文件(仅在 device 模式且提供 Secret 时执行) ----
       - name: Import signing certificate & profile (device only)
         if: inputs.target == 'device' && env.APPLE_CERTIFICATE != ''

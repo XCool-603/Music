@@ -1,3 +1,7 @@
+// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
+
 import AVFoundation
 import Foundation
 import MediaPlayer
@@ -9,13 +13,6 @@ import UIKit
 /// Integrated as a Tauri mobile plugin. It keeps `AVAudioSession` configured as
 /// `.playback` and drives `MPNowPlayingInfoCenter` so the WKWebView HTML5 audio
 /// keeps playing with the screen off, and the user gets lock-screen controls.
-///
-/// IMPORTANT (Mac integration):
-///   After `tauri ios init` on a Mac, place this file at
-///   `src-tauri/gen/apple/<Project>/<Project>/Plugins/NativeAudioPlugin.swift`
-///   and add it to the app target. The Rust plugin registers it via
-///   `tauri::ios_plugin_binding!(init_plugin_native_audio)`, which resolves to
-///   the `init_plugin_native_audio` symbol exposed below with `@_cdecl`.
 public class NativeAudioPlugin: Plugin {
 
   public override init() {

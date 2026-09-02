@@ -4,10 +4,20 @@ version = "0.1.0"
 description = "Native background/ lock-screen audio session for iOS (AVAudioSession playback + MPNowPlayingInfo). Keeps WKWebView audio alive with the screen off."
 edition = "2021"
 rust-version = "1.77.2"
+links = "tauri-plugin-native-audio"
 
 [lib]
 name = "tauri_plugin_native_audio"
 crate-type = ["rlib"]
+
+[package.metadata.tauri]
+libName = "tauri_plugin_native_audio"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-apple-darwin"]
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
