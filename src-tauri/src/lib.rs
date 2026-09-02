@@ -36,12 +36,77 @@ fn set_playback_state(
     .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn native_playback_available(app: tauri::AppHandle) -> bool {
+    tauri_plugin_native_audio::native_playback_available(&app)
+}
+
+#[tauri::command]
+fn native_set_source(
+    app: tauri::AppHandle,
+    url: String,
+    title: Option<String>,
+    artist: Option<String>,
+    album: Option<String>,
+    duration: f64,
+    position: f64,
+) -> Result<(), String> {
+    tauri_plugin_native_audio::native_set_source(
+        &app,
+        &url,
+        title.as_deref(),
+        artist.as_deref(),
+        album.as_deref(),
+        duration,
+        position,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn native_play(app: tauri::AppHandle) -> Result<(), String> {
+    tauri_plugin_native_audio::native_play(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn native_pause(app: tauri::AppHandle) -> Result<(), String> {
+    tauri_plugin_native_audio::native_pause(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn native_seek(app: tauri::AppHandle, position: f64) -> Result<(), String> {
+    tauri_plugin_native_audio::native_seek(&app, position).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn native_set_rate(app: tauri::AppHandle, rate: f64) -> Result<(), String> {
+    tauri_plugin_native_audio::native_set_rate(&app, rate).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn native_register_sink(
+    app: tauri::AppHandle,
+    channel: tauri::ipc::Channel<serde_json::Value>,
+) -> Result<(), String> {
+    tauri_plugin_native_audio::native_register_sink(&app, channel).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     println!("[MUSE-AUDIO] rust run() start");
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![set_keep_alive, set_playback_state])
+        .invoke_handler(tauri::generate_handler![
+            set_keep_alive,
+            set_playback_state,
+            native_playback_available,
+            native_set_source,
+            native_play,
+            native_pause,
+            native_seek,
+            native_set_rate,
+            native_register_sink
+        ])
         .plugin(tauri_plugin_keepawake::init())
         .plugin(tauri_plugin_native_audio::init());
     #[cfg(mobile)]

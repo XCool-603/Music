@@ -2,6 +2,7 @@ use serde::Serialize;
 #[cfg(target_os = "ios")]
 use std::sync::Mutex;
 use tauri::{
+    ipc::Channel,
     plugin::{Builder, PluginApi, TauriPlugin},
     AppHandle, Manager, Runtime,
 };
@@ -112,6 +113,178 @@ pub fn set_playback_state<R: Runtime>(
     #[cfg(not(target_os = "ios"))]
     {
         let _ = (app, playing, title, artist, album, duration, position, stream_url);
+    }
+    Ok(())
+}
+
+/// Payload for the native `setSource` command: the stream URL plus track
+/// metadata so the lock screen reflects the new track immediately.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+pub struct NativeSetSourcePayload<'a> {
+    url: &'a str,
+    title: Option<&'a str>,
+    artist: Option<&'a str>,
+    album: Option<&'a str>,
+    /// Track duration hint in seconds (0 when unknown yet).
+    duration: f64,
+    /// Resume position in seconds.
+    position: f64,
+}
+
+/// Payload for the native `seek` command.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+pub struct NativeSeekPayload {
+    position: f64,
+}
+
+/// Payload for the native `setRate` command.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+pub struct NativeRatePayload {
+    rate: f64,
+}
+
+/// Payload for the native `registerSink` command: the back-channel used to push
+/// position ticks / "track ended" / lock-screen remote commands into the
+/// frontend. Serialized as `{"channel":"__CHANNEL__:<id>"}` for the Swift side.
+#[derive(Serialize)]
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+pub struct NativeSinkPayload {
+    channel: Channel<serde_json::Value>,
+}
+
+/// Returns whether native (AVPlayer) playback is available. True only when the
+/// iOS plugin registered successfully; everywhere else playback stays HTML5.
+pub fn native_playback_available<R: Runtime>(app: &AppHandle<R>) -> bool {
+    #[cfg(target_os = "ios")]
+    {
+        return app.state::<NativeAudioState<R>>().0.lock().unwrap().is_some();
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = app;
+        return false;
+    }
+}
+
+/// Load a new source (track URL) into the native AVPlayer.
+pub fn native_set_source<R: Runtime>(
+    app: &AppHandle<R>,
+    url: &str,
+    title: Option<&str>,
+    artist: Option<&str>,
+    album: Option<&str>,
+    duration: f64,
+    position: f64,
+) -> tauri::Result<()> {
+    #[cfg(target_os = "ios")]
+    {
+        let handle = app.state::<NativeAudioState<R>>().0.lock().unwrap().clone();
+        if let Some(handle) = handle {
+            handle.run_mobile_plugin::<()>(
+                "setSource",
+                NativeSetSourcePayload {
+                    url,
+                    title,
+                    artist,
+                    album,
+                    duration,
+                    position,
+                },
+            )?;
+        }
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = (app, url, title, artist, album, duration, position);
+    }
+    Ok(())
+}
+
+/// Start native playback (activates `.playback` audio session).
+pub fn native_play<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    #[cfg(target_os = "ios")]
+    {
+        let handle = app.state::<NativeAudioState<R>>().0.lock().unwrap().clone();
+        if let Some(handle) = handle {
+            handle.run_mobile_plugin::<()>("play", ())?;
+        }
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = app;
+    }
+    Ok(())
+}
+
+/// Pause native playback (releases the audio session).
+pub fn native_pause<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    #[cfg(target_os = "ios")]
+    {
+        let handle = app.state::<NativeAudioState<R>>().0.lock().unwrap().clone();
+        if let Some(handle) = handle {
+            handle.run_mobile_plugin::<()>("pause", ())?;
+        }
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = app;
+    }
+    Ok(())
+}
+
+/// Seek the native player to the given position in seconds.
+pub fn native_seek<R: Runtime>(app: &AppHandle<R>, position: f64) -> tauri::Result<()> {
+    #[cfg(target_os = "ios")]
+    {
+        let handle = app.state::<NativeAudioState<R>>().0.lock().unwrap().clone();
+        if let Some(handle) = handle {
+            handle.run_mobile_plugin::<()>("seek", NativeSeekPayload { position })?;
+        }
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = (app, position);
+    }
+    Ok(())
+}
+
+/// Change the native playback rate (0.5 - 2.0).
+pub fn native_set_rate<R: Runtime>(app: &AppHandle<R>, rate: f64) -> tauri::Result<()> {
+    #[cfg(target_os = "ios")]
+    {
+        let handle = app.state::<NativeAudioState<R>>().0.lock().unwrap().clone();
+        if let Some(handle) = handle {
+            handle.run_mobile_plugin::<()>("setRate", NativeRatePayload { rate })?;
+        }
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = (app, rate);
+    }
+    Ok(())
+}
+
+/// Register the back-channel receiving native → frontend events (tick / ended /
+/// remote commands). The JS-side `Channel` is forwarded through the mobile
+/// plugin bridge and re-decoded natively; sends route back over the same id.
+pub fn native_register_sink<R: Runtime>(
+    app: &AppHandle<R>,
+    channel: Channel<serde_json::Value>,
+) -> tauri::Result<()> {
+    #[cfg(target_os = "ios")]
+    {
+        let handle = app.state::<NativeAudioState<R>>().0.lock().unwrap().clone();
+        if let Some(handle) = handle {
+            handle.run_mobile_plugin::<()>("registerSink", NativeSinkPayload { channel })?;
+        }
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = (app, channel);
     }
     Ok(())
 }

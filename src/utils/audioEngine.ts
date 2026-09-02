@@ -1,5 +1,14 @@
 import { EQPreset, AudioSettings } from '../types';
 import { getApiBase } from './apiBase';
+import {
+  isNativePlayback,
+  nativeSetSource,
+  nativePlay,
+  nativePause,
+  nativeSeek,
+  nativeSetRate,
+  getNativeSnapshot,
+} from './nativeAudio';
 
 export const EQ_FREQUENCIES_10 = [31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 export const EQ_FREQUENCIES_15 = [25, 40, 63, 100, 160, 250, 400, 630, 1000, 1600, 2500, 4000, 6300, 10000, 16000];
@@ -412,6 +421,12 @@ class AudioEngine {
   private cachedGains: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   private isBypassed = false;
   private impulseBuffers: { [key: string]: AudioBuffer } = {};
+  // Native (iOS AVPlayer) playback routing. When enabled, playback control and
+  // position/duration reads go to the native plugin instead of the HTML5
+  // element; volume/EQ setters are ignored (they only affect the Web Audio DSP
+  // graph, which is unused in native mode).
+  private nativeMode = false;
+  private nativeSnapshot = { playing: false, position: 0, duration: 0 };
 
   constructor() {
     this.initAudioElement();
@@ -646,14 +661,47 @@ class AudioEngine {
     return trimmed;
   }
 
-  public loadTrack(url: string, onEnded: () => void, onError: (e: unknown) => void) {
+  /**
+   * Route playback through the native AVPlayer plugin instead of the HTML5
+   * element. Call after `initNativePlayback` succeeded on iOS. EQ/DSP/volume
+   * controls become inert while enabled (native audio bypasses Web Audio).
+   */
+  public setNativeMode(enabled: boolean): void {
+    this.nativeMode = enabled;
+  }
+
+  public isUsingNativePlayback(): boolean {
+    return this.nativeMode && isNativePlayback();
+  }
+
+  public async loadTrack(url: string, onEnded: () => void, onError: (e: unknown) => void): Promise<void> {
     this.initAudioElement();
-    if (!this.audioElement) return;
 
     this.currentRawUrl = url;
     this.isProxyRetry = false;
 
     const playUrl = this.normalizeAudioUrl(url);
+
+    if (this.isUsingNativePlayback()) {
+      // Native AVPlayer: hand the resolved URL straight to the plugin and let it
+      // own loading + background playback. If the plugin call fails, fall back to
+      // the HTML5 path so the session still works.
+      const resumePos = this.getCurrentTime();
+      const ok = await nativeSetSource(playUrl, { title: undefined, artist: undefined, album: undefined, duration: 0 }, resumePos);
+      if (ok) {
+        this.nativeSnapshot = { playing: false, position: resumePos, duration: 0 };
+        return;
+      }
+      console.warn('[AudioEngine] native playback failed to load, falling back to HTML5');
+      this.loadTrackHtml5(playUrl, onEnded, onError);
+      return;
+    }
+
+    this.loadTrackHtml5(playUrl, onEnded, onError);
+  }
+
+  private loadTrackHtml5(playUrl: string, onEnded: () => void, onError: (e: unknown) => void) {
+    if (!this.audioElement) return;
 
     // When playing a cross-origin CDN link directly through the WebAudio DSP
     // graph (createMediaElementSource), the CDN MUST return Access-Control-Allow-Origin
@@ -686,6 +734,10 @@ class AudioEngine {
   }
 
   public async play(): Promise<void> {
+    if (this.isUsingNativePlayback()) {
+      nativePlay();
+      return;
+    }
     await this.resume();
     if (!this.audioElement) return;
     try {
@@ -696,12 +748,20 @@ class AudioEngine {
   }
 
   public pause(): void {
+    if (this.isUsingNativePlayback()) {
+      nativePause();
+      return;
+    }
     if (this.audioElement) {
       this.audioElement.pause();
     }
   }
 
   public seek(seconds: number): void {
+    if (this.isUsingNativePlayback()) {
+      nativeSeek(Math.max(0, seconds || 0));
+      return;
+    }
     if (this.audioElement && isFinite(seconds)) {
       this.audioElement.currentTime = Math.max(0, seconds);
     }
@@ -715,6 +775,10 @@ class AudioEngine {
   }
 
   public setPlaybackRate(rate: number): void {
+    if (this.isUsingNativePlayback()) {
+      nativeSetRate(rate);
+      return;
+    }
     if (this.audioElement) {
       this.audioElement.playbackRate = Math.max(0.5, Math.min(2.0, rate));
     }
@@ -925,10 +989,18 @@ class AudioEngine {
   }
 
   public getCurrentTime(): number {
+    if (this.isUsingNativePlayback()) {
+      const snap = getNativeSnapshot();
+      return snap.position;
+    }
     return this.audioElement ? this.audioElement.currentTime : 0;
   }
 
   public getDuration(): number {
+    if (this.isUsingNativePlayback()) {
+      const snap = getNativeSnapshot();
+      return snap.duration || this.audioElement?.duration || 0;
+    }
     return this.audioElement && !isNaN(this.audioElement.duration) ? this.audioElement.duration : 0;
   }
 

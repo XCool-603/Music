@@ -10,7 +10,7 @@ import {
   CustomSourceScript,
 } from './types';
 import { audioEngine, EQ_PRESETS } from './utils/audioEngine';
-import { setPlaybackState } from './utils/nativeAudio';
+import { setPlaybackState, initNativePlayback } from './utils/nativeAudio';
 import { apiUrl } from './utils/apiBase';
 import {
   parseScriptMetadata,
@@ -293,6 +293,8 @@ export default function App() {
   const queueRef = useRef(queue);
   const currentTrackRef = useRef(currentTrack);
   const handlePlayTrackRef = useRef<(track: Track) => void>(() => {});
+  const handleNextRef = useRef<() => void>(() => {});
+  const handlePrevRef = useRef<() => void>(() => {});
   useEffect(() => { playbackModeRef.current = playbackMode; }, [playbackMode]);
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { currentTrackRef.current = currentTrack; }, [currentTrack]);
@@ -454,13 +456,14 @@ export default function App() {
         }
       }
 
-      audioEngine.loadTrack(
+      audioEngine.setPlaybackRate(playbackSpeed);
+      // Wait for loadTrack to finish setting the source (native or HTML5)
+      // before starting playback, avoiding a play-before-source race.
+      await audioEngine.loadTrack(
         finalAudioUrl,
         handleTrackEnded,
         (err) => console.log('Handling stream fallback with Web Audio...')
       );
-
-      audioEngine.setPlaybackRate(playbackSpeed);
       audioEngine.play();
       setIsPlaying(true);
     },
@@ -531,6 +534,26 @@ export default function App() {
       streamUrl: currentTrack?.audioUrl ?? undefined,
     });
   }, [isPlaying, currentTrack, duration, currentTime]);
+
+  // Initialize native (iOS AVPlayer) playback on mount. On success, all
+  // subsequent play/pause/seek/loadTrack calls are routed through the native
+  // plugin so audio keeps running with the screen off. If native playback is
+  // unavailable (browser / desktop) the engine silently stays on HTML5 audio.
+  useEffect(() => {
+    initNativePlayback({
+      onEnded: handleTrackEnded,
+      onRemoteCommand: (cmd) => {
+        if (cmd === 'next') handleNextRef.current();
+        if (cmd === 'prev') handlePrevRef.current();
+      },
+      onPlaybackError: () => {
+        console.warn('[App] native playback error — falling back to HTML5 for this session');
+        audioEngine.setNativeMode(false);
+      },
+    }).then((ok) => {
+      if (ok) audioEngine.setNativeMode(true);
+    }).catch(() => {});
+  }, [handleTrackEnded]);
 
   // Navigation back-stack tracking (for the edge-swipe back gesture).
   const locationRef = useRef(location);
@@ -669,6 +692,12 @@ export default function App() {
     setCurrentTime(seconds);
     audioEngine.seek(seconds);
   };
+
+  // Keep latest handleNext / handlePrev accessible to native remote-command handlers.
+  useEffect(() => {
+    handleNextRef.current = handleNext;
+    handlePrevRef.current = handlePrev;
+  }, [handleNext, handlePrev]);
 
   // Volume
   const handleVolumeChange = (newVol: number) => {
