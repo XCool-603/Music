@@ -27,13 +27,14 @@ GEN_DIR="$(pwd)/gen/apple"
   exit 1
 }
 
-# Locate the generated app source folder (holds <NAME>.xcodeproj and <NAME>/).
-APP_ROOT="$(find "$GEN_DIR" -maxdepth 3 -name "*.xcodeproj" -type d | head -n1 | xargs dirname 2>/dev/null || true)"
-[ -z "$APP_ROOT" ] && {
+# Locate the generated Xcode project (e.g. gen/apple/<NAME>.xcodeproj).
+XCODEPROJ="$(find "$GEN_DIR" -maxdepth 3 -name "*.xcodeproj" -type d | head -n1 || true)"
+[ -z "$XCODEPROJ" ] && {
   echo "ERROR: no .xcodeproj under $GEN_DIR. Run 'tauri ios init' first (Xcode required)." >&2
   exit 1
 }
 
+APP_ROOT="$(dirname "$XCODEPROJ")"
 APP_NAME="$(basename "$APP_ROOT")"
 APP_SRC="$APP_ROOT/$APP_NAME"
 PLUGINS_DIR="$APP_SRC/Plugins"
@@ -41,7 +42,7 @@ mkdir -p "$PLUGINS_DIR"
 cp "$SWIFT_SRC" "$PLUGINS_DIR/NativeAudioPlugin.swift"
 echo "Copied -> $PLUGINS_DIR/NativeAudioPlugin.swift"
 
-PBXPROJ="$APP_ROOT/$APP_NAME.xcodeproj/project.pbxproj"
+PBXPROJ="$XCODEPROJ/project.pbxproj"
 
 add_with_ruby() {
   command -v ruby >/dev/null 2>&1 || return 1
@@ -59,7 +60,7 @@ add_with_ruby() {
     else
       puts "Already registered."
     end
-  ' "$APP_ROOT/$APP_NAME.xcodeproj" "Plugins/NativeAudioPlugin.swift" "$APP_NAME" 2>/dev/null
+  ' "$XCODEPROJ" "Plugins/NativeAudioPlugin.swift" "$APP_NAME" 2>/dev/null
 }
 
 if grep -q "NativeAudioPlugin.swift" "$PBXPROJ"; then
