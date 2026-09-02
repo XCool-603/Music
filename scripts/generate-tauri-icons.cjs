@@ -1,6 +1,7 @@
 const sharp = require('sharp');
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const ICONS_DIR = path.join(ROOT, 'src-tauri', 'icons');
@@ -14,47 +15,69 @@ if (!fs.existsSync(svgPath)) {
 }
 const svg = fs.readFileSync(svgPath);
 
-// Tauri required icon sizes
-const tauriIcons = {
-  '32x32.png': 32,
-  '128x128.png': 128,
-  '128x128@2x.png': 256,
-  'icon.png': 512,
-  // Square icons for various platforms
-  'Square30x30Logo.png': 30,
-  'Square44x44Logo.png': 44,
-  'Square71x71Logo.png': 71,
-  'Square89x89Logo.png': 89,
-  'Square107x107Logo.png': 107,
-  'Square142x142Logo.png': 142,
-  'Square150x150Logo.png': 150,
-  'Square284x284Logo.png': 284,
-  'Square310x310Logo.png': 310,
-  'StoreLogo.png': 50,
-  // Linux
-  '128x128@2x.png': 256,
-};
-
 async function rasterize(size) {
   return sharp(svg, { density: 288 }).resize(size, size, { fit: 'cover' }).png().toBuffer();
 }
 
 async function generate() {
-  for (const [name, size] of Object.entries(tauriIcons)) {
+  // Generate a high-res source PNG for tauri icon to process
+  const sourcePng = await rasterize(1024);
+  const sourcePngPath = path.join(ICONS_DIR, 'icon.png');
+  fs.writeFileSync(sourcePngPath, sourcePng);
+  console.log('Generated: icon.png (1024x1024)');
+
+  // Generate required PNG icons for tauri.conf.json references
+  const pngSizes = {
+    '32x32.png': 32,
+    '128x128.png': 128,
+    '128x128@2x.png': 256,
+  };
+
+  for (const [name, size] of Object.entries(pngSizes)) {
     const png = await rasterize(size);
     fs.writeFileSync(path.join(ICONS_DIR, name), png);
     console.log(`Generated: ${name} (${size}x${size})`);
   }
 
-  // Generate .ico for Windows (multi-size) from icon.svg
-  const ico = await svgToIco([16, 32, 48, 64, 128, 256]);
-  fs.writeFileSync(path.join(ICONS_DIR, 'icon.ico'), ico);
-  console.log('Generated: icon.ico');
+  // Square icons for various platforms
+  const squareSizes = {
+    'Square30x30Logo.png': 30,
+    'Square44x44Logo.png': 44,
+    'Square71x71Logo.png': 71,
+    'Square89x89Logo.png': 89,
+    'Square107x107Logo.png': 107,
+    'Square142x142Logo.png': 142,
+    'Square150x150Logo.png': 150,
+    'Square284x284Logo.png': 284,
+    'Square310x310Logo.png': 310,
+    'StoreLogo.png': 50,
+  };
 
-  // Generate icon.icns for macOS (PNG, Tauri converts) from icon.svg
-  const icnsPng = await rasterize(1024);
-  fs.writeFileSync(path.join(ICONS_DIR, 'icon.icns'), icnsPng);
-  console.log('Generated: icon.icns (1024x1024 PNG, Tauri converts)');
+  for (const [name, size] of Object.entries(squareSizes)) {
+    const png = await rasterize(size);
+    fs.writeFileSync(path.join(ICONS_DIR, name), png);
+    console.log(`Generated: ${name} (${size}x${size})`);
+  }
+
+  // Use Tauri's built-in icon generator to create proper ICO, ICNS, and all platform icons
+  try {
+    console.log('\nRunning tauri icon to generate platform-specific formats...');
+    execSync(`npx tauri icon "${sourcePngPath}" --output "${ICONS_DIR}"`, {
+      stdio: 'inherit',
+      cwd: ROOT,
+    });
+    console.log('tauri icon completed successfully');
+  } catch (e) {
+    console.warn('tauri icon failed, falling back to manual generation');
+    // Fallback: generate ICO manually
+    const ico = await svgToIco([16, 32, 48, 64, 128, 256]);
+    fs.writeFileSync(path.join(ICONS_DIR, 'icon.ico'), ico);
+    console.log('Generated: icon.ico (fallback)');
+
+    // Fallback: copy the 1024x1024 PNG as ICNS (Tauri may convert it)
+    fs.copyFileSync(sourcePngPath, path.join(ICONS_DIR, 'icon.icns'));
+    console.log('Generated: icon.icns (fallback - 1024x1024 PNG)');
+  }
 
   await generateAndroidLauncherIcons();
 
@@ -109,7 +132,7 @@ async function generateAndroidLauncherIcons() {
   // Adaptive icon definitions (API 26+).
   const anyDpi = path.join(resDir, 'mipmap-anydpi-v26');
   fs.mkdirSync(anyDpi, { recursive: true });
-  const adapt = (name, title) =>
+  const adapt = () =>
     `<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
   <background android:drawable="@drawable/ic_launcher_background" />
   <foreground android:drawable="@mipmap/ic_launcher_foreground" />
@@ -132,7 +155,7 @@ async function composeCentered(inner, size) {
   return canvas.toBuffer('image/png');
 }
 
-// Build a multi-size .ico from the SVG source.
+// Build a multi-size .ico from the SVG source (fallback when tauri icon is unavailable).
 async function svgToIco(sizeList) {
   const sizesToRun = sizeList.filter((s) => s >= 16);
   const PNGs = [];

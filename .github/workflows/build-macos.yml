@@ -65,6 +65,9 @@ jobs:
       - name: Install JS dependencies
         run: npm ci
 
+      - name: Generate app icons from SVG
+        run: npm run icons
+
       # 可选:导入 Apple 证书用于签名。未设置 Secret 时跳过 → 产出未签名包
       - name: Import Apple Developer certificate (signing)
         if: env.APPLE_CERTIFICATE != ''

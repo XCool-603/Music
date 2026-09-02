@@ -5,7 +5,7 @@
   "description": "MUSE.AUDIO - 多端自适应Hi-Fi音乐播放器",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host",
     "build:frontend": "vite build",
     "build:tauri": "node scripts/build-tauri-frontend.cjs",
     "build": "npm run build:frontend",

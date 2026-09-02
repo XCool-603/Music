@@ -46,6 +46,9 @@ jobs:
       - name: Install JS dependencies
         run: npm ci
 
+      - name: Generate app icons from SVG
+        run: npm run icons
+
       - name: Build Windows bundle (x64)
         # build:tauri 生成 dist-tauri,build:win 再跑 tauri build
         run: npm run build:win

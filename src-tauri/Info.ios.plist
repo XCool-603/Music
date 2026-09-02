@@ -8,6 +8,14 @@
         <string>audio</string>
     </array>
 
+    <!-- Required for lock-screen / Control Center media controls. -->
+    <key>UIApplicationSupportsIndirectInputEvents</key>
+    <true/>
+
+    <!-- Required for remote control events (play/pause/next/prev from lock screen). -->
+    <key>UIApplicationCanTerminateAfterBackgroundPlayback</key>
+    <false/>
+
     <!-- The backend API is plain HTTP (http://dxcool.cn:3001). Permit it. -->
     <key>NSAppTransportSecurity</key>
     <dict>

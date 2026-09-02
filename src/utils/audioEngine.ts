@@ -674,7 +674,12 @@ class AudioEngine {
     return this.nativeMode && isNativePlayback();
   }
 
-  public async loadTrack(url: string, onEnded: () => void, onError: (e: unknown) => void): Promise<void> {
+  public async loadTrack(
+    url: string,
+    onEnded: () => void,
+    onError: (e: unknown) => void,
+    metadata?: { title?: string; artist?: string; album?: string; duration?: number },
+  ): Promise<void> {
     this.initAudioElement();
 
     this.currentRawUrl = url;
@@ -687,9 +692,14 @@ class AudioEngine {
       // own loading + background playback. If the plugin call fails, fall back to
       // the HTML5 path so the session still works.
       const resumePos = this.getCurrentTime();
-      const ok = await nativeSetSource(playUrl, { title: undefined, artist: undefined, album: undefined, duration: 0 }, resumePos);
+      const ok = await nativeSetSource(playUrl, {
+        title: metadata?.title,
+        artist: metadata?.artist,
+        album: metadata?.album,
+        duration: metadata?.duration || 0,
+      }, resumePos);
       if (ok) {
-        this.nativeSnapshot = { playing: false, position: resumePos, duration: 0 };
+        this.nativeSnapshot = { playing: false, position: resumePos, duration: metadata?.duration || 0 };
         return;
       }
       console.warn('[AudioEngine] native playback failed to load, falling back to HTML5');
@@ -772,6 +782,10 @@ class AudioEngine {
     if (this.audioElement) {
       this.audioElement.volume = this.currentVolume;
     }
+  }
+
+  public getCurrentVolume(): number {
+    return this.currentVolume;
   }
 
   public setPlaybackRate(rate: number): void {
@@ -886,7 +900,13 @@ class AudioEngine {
 
   public setCompressorEnabled(enabled: boolean) {
     if (!this.compressorNode || !this.audioCtx) return;
-    this.compressorNode.threshold.setTargetAtTime(enabled ? -14 : 0, this.audioCtx.currentTime, 0.02);
+    if (enabled) {
+      this.compressorNode.threshold.setTargetAtTime(-14, this.audioCtx.currentTime, 0.02);
+      this.compressorNode.ratio.setTargetAtTime(4, this.audioCtx.currentTime, 0.02);
+    } else {
+      this.compressorNode.threshold.setTargetAtTime(0, this.audioCtx.currentTime, 0.02);
+      this.compressorNode.ratio.setTargetAtTime(1, this.audioCtx.currentTime, 0.02);
+    }
   }
 
   public applySettings(settings: AudioSettings) {

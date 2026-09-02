@@ -9,10 +9,11 @@ import {
   StreamQuality,
   CustomSourceScript,
 } from './types';
-import { audioEngine, EQ_PRESETS } from './utils/audioEngine';
+import { audioEngine } from './utils/audioEngine';
 import { setPlaybackState, initNativePlayback, isNativePlayback } from './utils/nativeAudio';
 import { getNativeSnapshot } from './utils/nativeAudio';
 import { apiUrl } from './utils/apiBase';
+import { mergeTranslationLyrics } from './utils/lyricsParser';
 import {
   parseScriptMetadata,
   SourceScriptRunner,
@@ -65,10 +66,21 @@ function PlaylistDetailRoute(
   props: Omit<React.ComponentProps<typeof PlaylistDetailView>, 'playlist'> & { playlists: Playlist[] }
 ) {
   const { playlists, ...viewProps } = props;
+  const navigate = useNavigate();
   const { id } = useParams();
   const playlist = playlists.find((p) => p.id === id);
   if (!playlist) {
-    return <div className="p-8 text-sm text-slate-400">歌单不存在或已被删除</div>;
+    return (
+      <div className="p-8 text-sm text-slate-400 flex flex-col items-center gap-4">
+        <span>歌单不存在或已被删除</span>
+        <button
+          onClick={() => navigate('/')}
+          className="px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 rounded-lg text-sm transition"
+        >
+          返回首页
+        </button>
+      </div>
+    );
   }
   return <PlaylistDetailView {...viewProps} playlist={playlist} />;
 }
@@ -250,7 +262,10 @@ export default function App() {
   }, [audioSettings]);
 
   // --- Navigation & Modal UI State ---
-  const activeTab = (PATH_TO_TAB[location.pathname] || 'discover') as ActiveTab;
+  const activeTab = (() => {
+    if (location.pathname.startsWith('/playlist/')) return 'playlist-detail' as ActiveTab;
+    return (PATH_TO_TAB[location.pathname] || 'discover') as ActiveTab;
+  })();
   const searchQueryFromState = (location.state as { q?: string } | null)?.q;
   const selectedPlaylistId = location.pathname.startsWith('/playlist/')
     ? location.pathname.split('/')[2] || null
@@ -302,6 +317,9 @@ export default function App() {
   useEffect(() => { currentTrackRef.current = currentTrack; }, [currentTrack]);
   const audioSettingsRef = useRef(audioSettings);
   useEffect(() => { audioSettingsRef.current = audioSettings; }, [audioSettings]);
+  const sleepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPlaybackSyncRef = useRef(0);
+  const nativeInitPromiseRef = useRef<Promise<boolean> | null>(null);
 
   // Handle track playback loop on end
   const handleTrackEnded = useCallback(() => {
@@ -391,6 +409,13 @@ export default function App() {
             const lrcData = await lrcRes.json();
             if (lrcData && lrcData.lrc) {
               resolvedTrack.lyrics = lrcData.lrc;
+              // Merge translation lyrics if available
+              if (lrcData.tlyric) {
+                const parsedLyrics = await import('./utils/lyricsParser').then(m => m.parseLRC(lrcData.lrc));
+                const merged = mergeTranslationLyrics(parsedLyrics, lrcData.tlyric);
+                // Store translation info in the lyrics string (appended as metadata)
+                resolvedTrack.lyrics = lrcData.lrc + '\n---tlyric---\n' + (lrcData.tlyric || '');
+              }
             }
           }
         } catch (lrcErr) {
@@ -464,7 +489,13 @@ export default function App() {
       await audioEngine.loadTrack(
         finalAudioUrl,
         handleTrackEnded,
-        (err) => console.log('Handling stream fallback with Web Audio...')
+        (err) => console.log('Handling stream fallback with Web Audio...'),
+        {
+          title: resolvedTrack.title,
+          artist: resolvedTrack.artist,
+          album: resolvedTrack.album,
+          duration: resolvedTrack.duration,
+        }
       );
       audioEngine.play();
       setIsPlaying(true);
@@ -525,7 +556,11 @@ export default function App() {
 
   // Native background-audio bridge (iOS): activate AVAudioSession playback,
   // keep lock-screen Now Playing metadata in sync. No-op in browser/desktop.
+  // Throttled to at most once per second to avoid 60fps IPC spam.
   useEffect(() => {
+    const now = Date.now();
+    if (now - lastPlaybackSyncRef.current < 1000) return;
+    lastPlaybackSyncRef.current = now;
     setPlaybackState({
       playing: isPlaying,
       title: currentTrack?.title ?? 'MUSE.AUDIO',
@@ -542,8 +577,8 @@ export default function App() {
   // plugin so audio keeps running with the screen off. If native playback is
   // unavailable (browser / desktop) the engine silently stays on HTML5 audio.
   useEffect(() => {
-    initNativePlayback({
-      onEnded: handleTrackEnded,
+    const promise = initNativePlayback({
+      onEnded: () => handleTrackEndedRef.current(),
       onRemoteCommand: (cmd) => {
         if (cmd === 'next') handleNextRef.current();
         if (cmd === 'prev') handlePrevRef.current();
@@ -552,7 +587,9 @@ export default function App() {
         console.warn('[App] native playback error — falling back to HTML5 for this session');
         audioEngine.setNativeMode(false);
       },
-    }).then((ok) => {
+    });
+    nativeInitPromiseRef.current = promise;
+    promise.then((ok) => {
       if (ok) {
         audioEngine.setNativeMode(true);
         console.log('[App] native playback ENGAGED (AVPlayer) — background playback active');
@@ -574,7 +611,7 @@ export default function App() {
     }).catch((e) => {
       console.warn('[App] initNativePlayback threw:', e);
     });
-  }, [handleTrackEnded]);
+  }, []);
 
   // Web Media Session API — enables background playback on PWA / Safari standalone
   // and shows lock-screen / notification media controls on supported browsers.
@@ -760,6 +797,10 @@ export default function App() {
     audioEngine.seek(seconds);
   };
 
+  // Keep latest handleTrackEnded accessible to native init effect.
+  const handleTrackEndedRef = useRef(handleTrackEnded);
+  useEffect(() => { handleTrackEndedRef.current = handleTrackEnded; }, [handleTrackEnded]);
+
   // Keep latest handleNext / handlePrev accessible to native remote-command handlers.
   useEffect(() => {
     handleNextRef.current = handleNext;
@@ -849,11 +890,16 @@ export default function App() {
   // Sleep Timer Handler
   const handleSetSleepTimer = (minutes: number | null) => {
     setSleepTimerMinutes(minutes);
+    if (sleepTimerRef.current) {
+      clearTimeout(sleepTimerRef.current);
+      sleepTimerRef.current = null;
+    }
     if (minutes !== null) {
-      setTimeout(() => {
+      sleepTimerRef.current = setTimeout(() => {
         audioEngine.pause();
         setIsPlaying(false);
         setSleepTimerMinutes(null);
+        sleepTimerRef.current = null;
       }, minutes * 60 * 1000);
     }
   };
@@ -884,28 +930,45 @@ export default function App() {
   };
 
   const handleAddTrackToPlaylist = (playlistId: string, trackId: string) => {
-    setPlaylists((prev) =>
-      prev.map((pl) => {
+    setPlaylists((prev) => {
+      const updated = prev.map((pl) => {
         if (pl.id === playlistId && !pl.trackIds.includes(trackId)) {
           return { ...pl, trackIds: [...pl.trackIds, trackId] };
         }
         return pl;
-      })
-    );
+      });
+      const customList = updated.filter((p) => p.isCustom);
+      localStorage.setItem('wavesound_custom_playlists', JSON.stringify(customList));
+      return updated;
+    });
   };
 
   const handleRemoveTrackFromPlaylist = (playlistId: string, trackId: string) => {
-    setPlaylists((prev) =>
-      prev.map((pl) => {
+    setPlaylists((prev) => {
+      const updated = prev.map((pl) => {
         if (pl.id === playlistId) {
           return { ...pl, trackIds: pl.trackIds.filter((id) => id !== trackId) };
         }
         return pl;
-      })
-    );
+      });
+      const customList = updated.filter((p) => p.isCustom);
+      localStorage.setItem('wavesound_custom_playlists', JSON.stringify(customList));
+      return updated;
+    });
   };
 
+  // Refs for keyboard shortcut handlers (avoids stale closures in global listener)
+  const handleTogglePlayRef = useRef(handleTogglePlay);
+  const handleSeekRef = useRef(handleSeek);
+  const handleVolumeChangeRef = useRef(handleVolumeChange);
+  const handleToggleMuteRef = useRef(handleToggleMute);
+  useEffect(() => { handleTogglePlayRef.current = handleTogglePlay; });
+  useEffect(() => { handleSeekRef.current = handleSeek; });
+  useEffect(() => { handleVolumeChangeRef.current = handleVolumeChange; });
+  useEffect(() => { handleToggleMuteRef.current = handleToggleMute; });
+
   // Global Keyboard Shortcuts
+  // Uses refs to avoid stale closures — no dependency on handler functions.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
@@ -914,22 +977,31 @@ export default function App() {
 
       if (e.code === 'Space') {
         e.preventDefault();
-        handleTogglePlay();
+        handleTogglePlayRef.current();
       } else if (e.code === 'ArrowLeft') {
         e.preventDefault();
-        handleSeek(Math.max(0, currentTime - 5));
+        const ct = audioEngine.getCurrentTime();
+        handleSeekRef.current(Math.max(0, ct - 5));
       } else if (e.code === 'ArrowRight') {
         e.preventDefault();
-        handleSeek(Math.min(duration, currentTime + 5));
+        const ct = audioEngine.getCurrentTime();
+        const du = audioEngine.getDuration();
+        handleSeekRef.current(Math.min(du || 0, ct + 5));
       } else if (e.code === 'ArrowUp') {
         e.preventDefault();
-        handleVolumeChange(Math.min(1, volume + 0.05));
+        const curVol = audioEngine.isUsingNativePlayback()
+          ? 0.85
+          : audioEngine.getCurrentVolume();
+        handleVolumeChangeRef.current(Math.min(1, curVol + 0.05));
       } else if (e.code === 'ArrowDown') {
         e.preventDefault();
-        handleVolumeChange(Math.max(0, volume - 0.05));
+        const curVol = audioEngine.isUsingNativePlayback()
+          ? 0.85
+          : audioEngine.getCurrentVolume();
+        handleVolumeChangeRef.current(Math.max(0, curVol - 0.05));
       } else if (e.code === 'KeyM') {
         e.preventDefault();
-        handleToggleMute();
+        handleToggleMuteRef.current();
       } else if (e.code === 'KeyF') {
         e.preventDefault();
         setIsFullScreenPlayerOpen((prev) => !prev);
@@ -938,7 +1010,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentTime, duration, volume, isPlaying, currentTrack]);
+  }, []);
 
   if (!dataLoaded) {
     return (

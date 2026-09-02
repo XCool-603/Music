@@ -67,6 +67,9 @@ jobs:
       - name: Install JS dependencies
         run: npm ci
 
+      - name: Generate app icons from SVG
+        run: npm run icons
+
       - name: Generate Xcode project (first init)
         run: npx tauri ios init --ci
 

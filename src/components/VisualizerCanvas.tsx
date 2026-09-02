@@ -19,36 +19,50 @@ export const VisualizerCanvas: React.FC<VisualizerCanvasProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameId = useRef<number | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const widthRef = useRef(300);
+  const dprRef = useRef(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    const width = rect.width || 300;
-    const canvasHeight = height;
-
-    canvas.width = width * dpr;
-    canvas.height = canvasHeight * dpr;
-    ctx.scale(dpr, dpr);
 
     const freqData = new Uint8Array(128);
     const timeData = new Uint8Array(128);
 
     let phase = 0;
 
+    const updateSize = () => {
+      const dpr = window.devicePixelRatio || 1;
+      dprRef.current = dpr;
+      const rect = container.getBoundingClientRect();
+      widthRef.current = rect.width || 300;
+      canvas.width = widthRef.current * dpr;
+      canvas.height = height * dpr;
+      ctx.scale(dpr, dpr);
+    };
+
+    updateSize();
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateSize();
+    });
+    resizeObserver.observe(container);
+
     const render = () => {
-      ctx.clearRect(0, 0, width, canvasHeight);
+      const w = widthRef.current;
+      const ch = height;
+
+      ctx.clearRect(0, 0, w, ch);
 
       if (isPlaying) {
         audioEngine.getAnalyserData(freqData);
         audioEngine.getTimeDomainData(timeData);
       } else {
-        // Idle gentle wave animation
         phase += 0.03;
         for (let i = 0; i < 64; i++) {
           freqData[i] = Math.max(8, (Math.sin(phase + i * 0.2) + 1) * 16);
@@ -57,17 +71,17 @@ export const VisualizerCanvas: React.FC<VisualizerCanvasProps> = ({
       }
 
       if (mode === 'bars') {
-        const barCount = Math.min(48, Math.floor(width / 6));
-        const barWidth = (width / barCount) - 2;
+        const barCount = Math.min(48, Math.floor(w / 6));
+        const barWidth = (w / barCount) - 2;
 
         for (let i = 0; i < barCount; i++) {
           const dataIndex = Math.floor((i / barCount) * 50);
           const rawVal = freqData[dataIndex] || 0;
-          const barHeight = Math.max(3, (rawVal / 255) * (canvasHeight - 6));
+          const barHeight = Math.max(3, (rawVal / 255) * (ch - 6));
           const x = i * (barWidth + 2);
-          const y = canvasHeight - barHeight;
+          const y = ch - barHeight;
 
-          const gradient = ctx.createLinearGradient(0, y, 0, canvasHeight);
+          const gradient = ctx.createLinearGradient(0, y, 0, ch);
           gradient.addColorStop(0, themeColor);
           gradient.addColorStop(1, `${themeColor}40`);
 
@@ -76,7 +90,6 @@ export const VisualizerCanvas: React.FC<VisualizerCanvasProps> = ({
           ctx.roundRect(x, y, barWidth, barHeight, [2, 2, 0, 0]);
           ctx.fill();
 
-          // Cap indicator
           ctx.fillStyle = '#ffffff';
           ctx.globalAlpha = 0.8;
           ctx.fillRect(x, Math.max(0, y - 2), barWidth, 1.5);
@@ -89,12 +102,12 @@ export const VisualizerCanvas: React.FC<VisualizerCanvasProps> = ({
         ctx.shadowColor = themeColor;
         ctx.shadowBlur = 10;
 
-        const sliceWidth = width / 64;
+        const sliceWidth = w / 64;
         let x = 0;
 
         for (let i = 0; i < 64; i++) {
           const v = timeData[i] / 128.0;
-          const y = (v * canvasHeight) / 2;
+          const y = (v * ch) / 2;
 
           if (i === 0) {
             ctx.moveTo(x, y);
@@ -107,8 +120,8 @@ export const VisualizerCanvas: React.FC<VisualizerCanvasProps> = ({
         ctx.stroke();
         ctx.shadowBlur = 0;
       } else if (mode === 'circle') {
-        const centerX = width / 2;
-        const centerY = canvasHeight / 2;
+        const centerX = w / 2;
+        const centerY = ch / 2;
         const baseRadius = Math.min(centerX, centerY) * 0.45;
         const totalPoints = 40;
 
@@ -132,21 +145,20 @@ export const VisualizerCanvas: React.FC<VisualizerCanvasProps> = ({
         ctx.closePath();
         ctx.stroke();
 
-        // Inner glowing core
         ctx.beginPath();
         ctx.arc(centerX, centerY, baseRadius * 0.6, 0, Math.PI * 2);
         ctx.fillStyle = `${themeColor}30`;
         ctx.fill();
       } else if (mode === 'neon') {
         const steps = 24;
-        const stepWidth = width / steps;
+        const stepWidth = w / steps;
         for (let i = 0; i < steps; i++) {
           const val = freqData[i * 2] / 255;
           const segments = Math.floor(val * 10);
           const x = i * stepWidth + 2;
 
           for (let s = 0; s < 10; s++) {
-            const segY = canvasHeight - (s + 1) * (canvasHeight / 11);
+            const segY = ch - (s + 1) * (ch / 11);
             const isLit = s <= segments;
             ctx.fillStyle = isLit
               ? s > 7
@@ -155,7 +167,7 @@ export const VisualizerCanvas: React.FC<VisualizerCanvasProps> = ({
                 ? '#f59e0b'
                 : themeColor
               : 'rgba(255,255,255,0.06)';
-            ctx.fillRect(x, segY, stepWidth - 4, (canvasHeight / 11) - 2);
+            ctx.fillRect(x, segY, stepWidth - 4, (ch / 11) - 2);
           }
         }
       }
@@ -166,6 +178,7 @@ export const VisualizerCanvas: React.FC<VisualizerCanvasProps> = ({
     render();
 
     return () => {
+      resizeObserver.disconnect();
       if (animFrameId.current) {
         cancelAnimationFrame(animFrameId.current);
       }
@@ -173,7 +186,7 @@ export const VisualizerCanvas: React.FC<VisualizerCanvasProps> = ({
   }, [mode, isPlaying, themeColor, height]);
 
   return (
-    <div className={`relative w-full overflow-hidden ${className}`}>
+    <div ref={containerRef} className={`relative w-full overflow-hidden ${className}`}>
       <canvas
         ref={canvasRef}
         className="w-full block"

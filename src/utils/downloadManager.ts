@@ -382,12 +382,14 @@ export async function downloadTrackCover(track: Track): Promise<boolean> {
     notifyListeners();
     return true;
   } catch (err: any) {
-    // Fallback: try proxying cover or opening in new tab
-    triggerDirectDownload(track.coverUrl, filename);
-    task.progress = 100;
-    task.status = 'completed';
+    task.status = 'error';
+    task.error = err?.message || '封面下载失败';
     notifyListeners();
-    return true;
+    // Fallback: try opening in new tab as last resort
+    try {
+      triggerDirectDownload(track.coverUrl, filename);
+    } catch {}
+    return false;
   }
 }
 

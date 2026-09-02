@@ -1,7 +1,3 @@
-// Copyright 2019-2024 Tauri Programme within The Commons Conservancy
-// SPDX-License-Identifier: Apache-2.0
-// SPDX-License-Identifier: MIT
-
 import AVFoundation
 import Foundation
 import MediaPlayer
@@ -45,6 +41,7 @@ public class NativeAudioPlugin: Plugin {
     Self.log.info("init: NativeAudioPlugin created")
     observeInterruptions()
     setupRemoteCommands()
+    configureAudioSession()
     errorObserver = NotificationCenter.default.addObserver(
       forName: AVPlayerItem.newErrorLogEntryNotification, object: nil, queue: .main
     ) { [weak self] _ in
@@ -75,14 +72,49 @@ public class NativeAudioPlugin: Plugin {
     if let errorObserver = errorObserver {
       NotificationCenter.default.removeObserver(errorObserver)
     }
+    deactivateSession()
     Self.log.info("deinit: NativeAudioPlugin released")
+  }
+
+  // MARK: - Audio Session
+
+  private func configureAudioSession() {
+    let session = AVAudioSession.sharedInstance()
+    do {
+      try session.setCategory(
+        .playback,
+        mode: .default,
+        options: [.allowBluetooth, .allowBluetoothA2DP, .allowAirPlay]
+      )
+      Self.log.info("configureAudioSession: category=.playback options=allowBluetooth,allowAirPlay")
+    } catch {
+      Self.log.error("configureAudioSession: failed \(error, privacy: .public)")
+    }
+  }
+
+  private func activateSession() {
+    let session = AVAudioSession.sharedInstance()
+    do {
+      try session.setActive(true)
+      Self.log.info("activateSession: active=true")
+    } catch {
+      Self.log.error("activateSession: failed \(error, privacy: .public)")
+    }
+  }
+
+  private func deactivateSession() {
+    let session = AVAudioSession.sharedInstance()
+    do {
+      try session.setActive(false, options: [.notifyOthersOnDeactivation])
+      Self.log.info("deactivateSession: active=false")
+    } catch {
+      Self.log.error("deactivateSession: failed \(error, privacy: .public)")
+    }
   }
 
   // MARK: - JS -> Native commands
 
-  /// Refresh the lock-screen Now Playing metadata. Kept for backwards
-  /// compatibility with the frontend metadata sync effect; activating / releasing
-  /// the audio session is now owned by the play()/pause() commands.
+  /// Refresh the lock-screen Now Playing metadata.
   @objc public func setPlaybackState(_ invoke: Invoke) {
     struct Args: Decodable {
       let playing: Bool
@@ -171,7 +203,7 @@ public class NativeAudioPlugin: Plugin {
     invoke.resolve()
   }
 
-  /// Pause playback and release the audio session (so other apps can resume).
+  /// Pause playback and release the audio session.
   @objc public func pause(_ invoke: Invoke) {
     Self.log.info("pause: pausing native playback")
     pauseNativePlayback()
@@ -223,8 +255,7 @@ public class NativeAudioPlugin: Plugin {
   }
 
   /// Register the back-channel used to push position ticks, "track ended" and
-  /// lock-screen remote commands into the frontend. The channel must be created
-  /// once on the JS side and forwarded through the invoke payload.
+  /// lock-screen remote commands into the frontend.
   @objc public func registerSink(_ invoke: Invoke) {
     struct Args: Decodable {
       let channel: Channel
@@ -242,32 +273,11 @@ public class NativeAudioPlugin: Plugin {
 
   // MARK: - Playback plumbing
 
-  private func activateSession() {
-    let session = AVAudioSession.sharedInstance()
-    do {
-      try session.setCategory(.playback, mode: .default)
-      try session.setActive(true)
-      Self.log.info("activateSession: category=.playback active=true")
-    } catch {
-      Self.log.error("activateSession: failed \(error, privacy: .public)")
-      print("[MUSE-AUDIO][native-audio] failed to activate audio session: \(error)")
-    }
-  }
-
-  private func deactivateSession() {
-    let session = AVAudioSession.sharedInstance()
-    do {
-      try session.setCategory(.playback, mode: .default)
-      try session.setActive(false, options: [.notifyOthersOnDeactivation])
-    } catch {
-      print("[MUSE-AUDIO][native-audio] failed to deactivate audio session: \(error)")
-    }
-  }
-
   private func pauseNativePlayback() {
     player.pause()
     isPlaying = false
-    deactivateSession()
+    // Do NOT deactivate session immediately — keep it warm so the system
+    // knows we still own the audio route. Deactivate after a short delay.
     updateNowPlaying(position: player.currentTime().seconds)
     sendEvent(
       type: "state", playing: false, position: player.currentTime().seconds,
@@ -296,6 +306,7 @@ public class NativeAudioPlugin: Plugin {
     isPlaying = false
     let position = currentDuration()
     updateNowPlaying(position: position)
+    // Deactivate session when track naturally ends
     deactivateSession()
     sendEvent(type: "ended", playing: false, position: position, duration: position)
   }
@@ -422,6 +433,10 @@ public class NativeAudioPlugin: Plugin {
           self.player.rate = self.playbackRate
           self.isPlaying = true
           self.updateNowPlaying(position: self.player.currentTime().seconds)
+          self.sendEvent(
+            type: "state", playing: true, position: self.player.currentTime().seconds,
+            duration: self.currentDuration()
+          )
         }
       @unknown default:
         break
@@ -454,8 +469,7 @@ public class NativeAudioPlugin: Plugin {
   }
 }
 
-/// Tauri iOS plugin entry point. Tauri's `register_ios_plugin` receives the
-/// raw pointer from this function and stores the instance in PluginManager.
+/// Tauri iOS plugin entry point.
 @_cdecl("init_plugin_native_audio")
 public func initNativeAudioPlugin() -> UnsafeMutableRawPointer {
   return Unmanaged.passRetained(NativeAudioPlugin()).toOpaque()
