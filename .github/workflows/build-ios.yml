@@ -37,6 +37,11 @@ jobs:
   build-ios:
     name: iOS (${{ inputs.target || 'simulator' }})
     runs-on: macos-latest
+    # Job 级别把 Secrets 映射为环境变量,步骤 if: env.X != '' 才能正确判断
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_PROFILE: ${{ secrets.APPLE_PROFILE }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -69,9 +74,6 @@ jobs:
       - name: Import signing certificate & profile (device only, optional)
         if: inputs.target == 'device' && env.APPLE_CERTIFICATE != ''
         env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_PROFILE: ${{ secrets.APPLE_PROFILE }}
           RUNNER_TMP: ${{ runner.temp }}
         run: |
           set -e
@@ -97,8 +99,6 @@ jobs:
         if: inputs.target == 'device'
         # 无证书 → 产出【未签名 .ipa】,下载后用爱思助手/免费 Apple ID 自行签名。
         # 已配置证书 Secrets → 由 Xcode 自动签名产出已签名 .ipa。
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
         run: |
           if [ -n "$APPLE_CERTIFICATE" ]; then
             npx tauri ios build --ci
