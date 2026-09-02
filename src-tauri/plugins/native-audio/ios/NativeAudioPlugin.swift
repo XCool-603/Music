@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import MediaPlayer
+import Tauri
 import UIKit
 
 /// Native audio session helper for MUSE.AUDIO (iOS).
