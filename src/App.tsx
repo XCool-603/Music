@@ -11,6 +11,7 @@ import {
 } from './types';
 import { audioEngine, EQ_PRESETS } from './utils/audioEngine';
 import { setPlaybackState, initNativePlayback } from './utils/nativeAudio';
+import { getNativeSnapshot } from './utils/nativeAudio';
 import { apiUrl } from './utils/apiBase';
 import {
   parseScriptMetadata,
@@ -200,6 +201,7 @@ export default function App() {
   }, [customScripts]);
 
   // --- Audio State ---
+  const [nativeDiag, setNativeDiag] = useState<{ engaged: boolean; ticks: number } | null>(null);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -556,7 +558,19 @@ export default function App() {
         console.log('[App] native playback ENGAGED (AVPlayer) — background playback active');
       } else {
         console.warn('[App] native playback unavailable — using HTML5 audio (background may stop)');
+        setNativeDiag({ engaged: false, ticks: 0 });
+        return;
       }
+      setNativeDiag({ engaged: true, ticks: 0 });
+      const iv = window.setInterval(() => {
+        setNativeDiag((d) => (d && d.engaged ? { engaged: true, ticks: d.ticks + 1 } : d));
+        const snap = getNativeSnapshot();
+        // Surface a screen-visible marker so runtime backend is obvious without consoles.
+        document.title = snap.playing
+          ? `▶ AV ${snap.position.toFixed(0)}s`
+          : `▮▮ AV`;
+      }, 1000);
+      return () => window.clearInterval(iv);
     }).catch((e) => {
       console.warn('[App] initNativePlayback threw:', e);
     });
@@ -893,6 +907,12 @@ export default function App() {
 
   return (
     <div className="h-screen w-screen bg-[#08080c] text-slate-100 flex flex-col font-sans antialiased overflow-hidden select-none relative pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+      {/* Debug backend banner (temporary; remove after iOS background audio is verified) */}
+      {nativeDiag && (
+        <div className="absolute top-1 left-1 z-50 px-2 py-0.5 rounded text-[10px] font-bold pointer-events-none" style={{ backgroundColor: nativeDiag.engaged ? 'rgba(16,185,129,0.85)' : 'rgba(244,63,94,0.85)', color: '#fff' }}>
+          {nativeDiag.engaged ? `AVP ▸ ${nativeDiag.ticks}s` : 'HTML5 *'}
+        </div>
+      )}
       {/* Ambient Frosted Background Glowing Orbs */}
       <div className="absolute top-[-10%] left-[10%] w-[450px] h-[450px] bg-indigo-600/20 rounded-full blur-[130px] pointer-events-none -z-0" />
       <div className="absolute bottom-[-5%] right-[5%] w-[550px] h-[550px] bg-emerald-500/10 rounded-full blur-[150px] pointer-events-none -z-0" />
