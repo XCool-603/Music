@@ -1,0 +1,84 @@
+# =============================================================================
+#  Android 打包 (Tauri 2)
+#
+#  触发:
+#    - 手动触发 (workflow_dispatch) —— 在 GitHub Actions 页面点 "Run workflow"
+#
+#  产物:
+#    - APK(universal 全 ABIn 各架构)在 artifact 中
+#
+#  说明:
+#    - Android 构建可在 ubuntu runner 上进行
+#    - NDK / build-tools / platform-tools 由 android-actions/setup-android 准备,
+#      tauri-cli 会自动补装所需 NDK 版本
+#    - gen/android 工程已提交,无需 tauri android init
+# =============================================================================
+
+name: Build Android
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: '构建目标是哪套 ABI'
+        type: choice
+        options:
+          - 'universal'   # 全 ABI(默认)
+          - 'apk'         # 同 universal,生成各架构 APK
+        default: 'universal'
+
+jobs:
+  build-android:
+    name: Android (${{ inputs.target || 'universal' }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: |
+            aarch64-linux-android
+            armv7-linux-androideabi
+            i686-linux-android
+            x86_64-linux-android
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Build Android APK
+        run: npx tauri android build --apk
+
+      - name: Verify APK outputs
+        shell: bash
+        run: |
+          find src-tauri/gen/android/app/build/outputs -name "*.apk" -exec ls -lh {} +
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: muse-audio-android
+          path: |
+            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: warn

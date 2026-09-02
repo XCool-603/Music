@@ -1,0 +1,66 @@
+# =============================================================================
+#  Windows 打包 (Tauri 2)
+#
+#  触发:
+#    - 手动触发 (workflow_dispatch) —— 在 GitHub Actions 页面点 "Run workflow"
+#
+#  产物 (x64):
+#    - NSIS 安装包  -> build/nsis/muse-audio_0.1.0_x64-setup.exe
+#    - MSI 安装包   -> build/msi/muse-audio_0.1.0_x64_en-US.msi
+#
+#  说明:
+#    - Windows 只能在 windows runner 上构建 (需要 MSVC 工具链)
+#    - NSIS / WiX 由 tauri-cli 自动下载,无需额外安装
+#    - 需要 WebView2 Runtime(windows-latest 镜像已内置)
+# =============================================================================
+
+name: Build Windows
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Build Windows bundle (x64)
+        # build:tauri 生成 dist-tauri,build:win 再跑 tauri build
+        run: npm run build:win
+
+      - name: Verify Windows artifacts
+        shell: bash
+        run: |
+          ls -la src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/ 2>/dev/null || true
+          ls -la src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/ 2>/dev/null || true
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: muse-audio-windows
+          path: |
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          if-no-files-found: warn
