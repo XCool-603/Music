@@ -15,7 +15,7 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, TAG, 'Ability onDestroy');
   }
 
-  onWindowStageCreate(windowStage: window.Window): void {
+  onWindowStageCreate(windowStage: window.WindowStage): void {
     hilog.info(DOMAIN, TAG, 'Ability onWindowStageCreate');
     windowStage.loadContent('pages/Index', (err: BusinessError) => {
       if (err.code) {
