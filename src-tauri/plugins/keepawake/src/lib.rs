@@ -1,13 +1,17 @@
 use serde::Serialize;
+#[cfg(target_os = "android")]
 use std::sync::Mutex;
 use tauri::{
-    plugin::{Builder, PluginApi, PluginHandle, TauriPlugin},
+    plugin::{Builder, PluginApi, TauriPlugin},
     AppHandle, Manager, Runtime,
 };
+#[cfg(target_os = "android")]
+use tauri::plugin::PluginHandle;
 
 /// Payload sent to the Kotlin plugin over the mobile plugin channel.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
 struct KeepAlivePayload<'a> {
     playing: bool,
     title: Option<&'a str>,
