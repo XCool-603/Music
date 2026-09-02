@@ -1,7 +1,6 @@
 {
   "modelVersion": "5.0.0",
   "dependencies": {
-    "@ohos/hvigor-ohos-plugin": "5.0.13.200"
   },
   "execution": {
     "analyze": "normal",
