@@ -184,7 +184,7 @@ pub fn native_set_source<R: Runtime>(
     {
         let handle = app.state::<NativeAudioState<R>>().0.lock().unwrap().clone();
         if let Some(handle) = handle {
-            handle.run_mobile_plugin::<()>(
+            if let Err(e) = handle.run_mobile_plugin::<()>(
                 "setSource",
                 NativeSetSourcePayload {
                     url,
@@ -194,7 +194,9 @@ pub fn native_set_source<R: Runtime>(
                     duration,
                     position,
                 },
-            )?;
+            ) {
+                eprintln!("[MUSE-AUDIO][native-audio] setSource failed: {e}");
+            }
         }
     }
     #[cfg(not(target_os = "ios"))]
@@ -210,7 +212,9 @@ pub fn native_play<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     {
         let handle = app.state::<NativeAudioState<R>>().0.lock().unwrap().clone();
         if let Some(handle) = handle {
-            handle.run_mobile_plugin::<()>("play", ())?;
+            if let Err(e) = handle.run_mobile_plugin::<()>("play", ()) {
+                eprintln!("[MUSE-AUDIO][native-audio] play failed: {e}");
+            }
         }
     }
     #[cfg(not(target_os = "ios"))]
@@ -226,7 +230,9 @@ pub fn native_pause<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     {
         let handle = app.state::<NativeAudioState<R>>().0.lock().unwrap().clone();
         if let Some(handle) = handle {
-            handle.run_mobile_plugin::<()>("pause", ())?;
+            if let Err(e) = handle.run_mobile_plugin::<()>("pause", ()) {
+                eprintln!("[MUSE-AUDIO][native-audio] pause failed: {e}");
+            }
         }
     }
     #[cfg(not(target_os = "ios"))]
@@ -242,7 +248,9 @@ pub fn native_seek<R: Runtime>(app: &AppHandle<R>, position: f64) -> tauri::Resu
     {
         let handle = app.state::<NativeAudioState<R>>().0.lock().unwrap().clone();
         if let Some(handle) = handle {
-            handle.run_mobile_plugin::<()>("seek", NativeSeekPayload { position })?;
+            if let Err(e) = handle.run_mobile_plugin::<()>("seek", NativeSeekPayload { position }) {
+                eprintln!("[MUSE-AUDIO][native-audio] seek failed: {e}");
+            }
         }
     }
     #[cfg(not(target_os = "ios"))]
@@ -258,7 +266,9 @@ pub fn native_set_rate<R: Runtime>(app: &AppHandle<R>, rate: f64) -> tauri::Resu
     {
         let handle = app.state::<NativeAudioState<R>>().0.lock().unwrap().clone();
         if let Some(handle) = handle {
-            handle.run_mobile_plugin::<()>("setRate", NativeRatePayload { rate })?;
+            if let Err(e) = handle.run_mobile_plugin::<()>("setRate", NativeRatePayload { rate }) {
+                eprintln!("[MUSE-AUDIO][native-audio] setRate failed: {e}");
+            }
         }
     }
     #[cfg(not(target_os = "ios"))]
@@ -279,7 +289,9 @@ pub fn native_register_sink<R: Runtime>(
     {
         let handle = app.state::<NativeAudioState<R>>().0.lock().unwrap().clone();
         if let Some(handle) = handle {
-            handle.run_mobile_plugin::<()>("registerSink", NativeSinkPayload { channel })?;
+            if let Err(e) = handle.run_mobile_plugin::<()>("registerSink", NativeSinkPayload { channel }) {
+                eprintln!("[MUSE-AUDIO][native-audio] registerSink failed: {e}");
+            }
         }
     }
     #[cfg(not(target_os = "ios"))]
