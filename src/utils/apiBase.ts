@@ -13,31 +13,25 @@ export function getApiBase(): string {
     /* ignore localStorage errors */
   }
 
-  const host = window.location.hostname;
-  const isLoopback =
-    host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
-
-  // Vite dev server proxies /api -> remote backend (dxcool.cn:3001).
-  // Return empty base so relative /api/* requests are proxied by Vite,
-  // which avoids assuming a local backend on :3001.
-  if (isLoopback && window.location.port === '3000') {
-    return '';
+  // Explicit build-time override, e.g. VITE_API_BASE=https://api.example.com.
+  const envBase = (import.meta as any).env?.VITE_API_BASE as string | undefined;
+  if (envBase && /^https?:\/\//.test(envBase)) {
+    return envBase.replace(/\/+$/, '');
   }
 
-  // Packaged shell (Tauri custom protocol, in-app local web server, Capacitor,
-  // HarmonyOS ArkWeb rawfile) has no embedded backend — always talk online.
   const protocol = (window.location.protocol || '').toLowerCase();
   const isNativeShell =
     protocol !== 'http:' && protocol !== 'https:' && protocol.length > 0;
-  if (isLoopback || isTauriRuntime() || isNativeShell) {
+  if (isTauriRuntime() || isNativeShell) {
+    // Packaged shell (Tauri custom protocol, in-app local web server, Capacitor,
+    // HarmonyOS ArkWeb rawfile) has no embedded backend — always talk online.
     return DEFAULT_ONLINE_API;
   }
 
-  // Pure web deploy hosted on the API origin: same-origin /api (http://dxcool.cn:3001).
-  if (host === 'dxcool.cn') {
-    return '';
-  }
-  return DEFAULT_ONLINE_API;
+  // Pure web deploy (any host served over http/https): use same-origin /api.
+  // The backend is expected to be served from the same origin the frontend is
+  // deployed on, so we must not hardcode a fixed domain.
+  return '';
 }
 
 export function setApiBase(base: string): void {
