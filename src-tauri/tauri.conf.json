@@ -51,10 +51,7 @@
       }
     },
     "iOS": {
-      "minimumSystemVersion": "14.0",
-      "capabilities": [
-        "background-audio"
-      ]
+      "minimumSystemVersion": "14.0"
     }
   }
 }
