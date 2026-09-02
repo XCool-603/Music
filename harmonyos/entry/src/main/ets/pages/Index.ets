@@ -1,9 +1,28 @@
 import { webview } from '@kit.ArkWeb';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { window } from '@kit.ArkUI';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'MuseAudio';
+
+type ErrorReceiveEvent = {
+  request: {
+    getErrorInfo(): string;
+  };
+  error: {
+    getErrorInfo(): string;
+    getErrorCode(): number;
+  };
+};
+type ConsoleEvent = {
+  message: {
+    getMessage(): string;
+  };
+};
+type ProgressChangeEvent = {
+  newProgress: number;
+};
 
 @Entry
 @Component
@@ -48,16 +67,17 @@ struct Index {
         .fileAccess(true)
         .onlineImageAccess(true)
         .mediaAccess(true)
-        .onErrorReceive((event) => {
+        .onErrorReceive((event: ErrorReceiveEvent) => {
           hilog.error(DOMAIN, TAG, 'Web onErrorReceive: %{public}s',
-            JSON.stringify(event?.request?.getErrorInfo ? event.request.getErrorInfo() : event));
+            event.error && event.error.getErrorInfo ? event.error.getErrorInfo() : JSON.stringify(event));
         })
-        .onConsole((event) => {
+        .onConsole((event: ConsoleEvent) => {
           if (event && event.message) {
             hilog.info(DOMAIN, TAG, 'console: %{public}s', event.message.getMessage());
           }
+          return false;
         })
-        .onProgressChange((event) => {
+        .onProgressChange((event: ProgressChangeEvent) => {
           // 可在此加加载进度动画
         })
     }
