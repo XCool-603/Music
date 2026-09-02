@@ -42,6 +42,7 @@ jobs:
       - name: Setup HarmonyOS CLI tools & SDK
         uses: ErBWs/setup-ohos@v2
         with:
+          version: 5.0.13.200
           cache: true
 
       - name: Verify environment
