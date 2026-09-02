@@ -48,6 +48,7 @@ jobs:
       - name: Verify environment
         working-directory: harmonyos
         run: |
+          npm config set registry https://registry.npmjs.org/ --global
           hvigorw -v
           ohpm -v
           echo "HOS_SDK_HOME=$HOS_SDK_HOME"
