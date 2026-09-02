@@ -1,8 +1,16 @@
 using Microsoft.Extensions.FileProviders;
+using Muse.Audio.Api.Services;
+using Muse.Audio.Api.Services.Official;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
+// v2 official-upstream clients (v1 MusicController keeps its static new() MusicService untouched).
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<MusicService>();
+builder.Services.AddSingleton<KuwoOfficialClient>();
+builder.Services.AddSingleton<NetEaseOfficialClient>();
+builder.Services.AddSingleton<V2MusicService>();
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>

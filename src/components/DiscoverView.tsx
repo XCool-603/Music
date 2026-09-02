@@ -1,29 +1,18 @@
-import React, { useState, useMemo } from 'react';
-import { Track, Playlist } from '../types';
-import { GENRE_CATEGORIES, getHeroTracks, getTrendingTracks, filterTracksByGenre } from '../data/discoveryData';
-import { formatTime } from '../utils/lyricsParser';
-import { ImageWithFallback } from './ImageWithFallback';
-import { normalizeCoverUrl } from '../utils/imageUtils';
-import {
-  Play,
-  Pause,
-  Plus,
-  Heart,
-  Sparkles,
-  Flame,
-  Clock,
-  ListPlus,
-  Shuffle,
-  Volume2,
-  Headphones,
-  Check,
-  Download,
-} from 'lucide-react';
-import confetti from 'canvas-confetti';
+import React, { useMemo, useState } from 'react';
+import { ListMusic, Music, Sparkles } from 'lucide-react';
+import { Track, Playlist, GenreCategory } from '../types';
+import { GENRE_CATEGORIES } from '../data/discoveryData';
+import { BannerCarousel } from './discover/BannerCarousel';
+import { QuickEntry } from './discover/QuickEntry';
+import { PlaylistSection } from './discover/PlaylistSection';
+import { ToplistSection } from './discover/ToplistSection';
+import { RecentSection } from './discover/RecentSection';
 
 interface DiscoverViewProps {
   tracks: Track[];
   playlists: Playlist[];
+  heroTracks: Track[];
+  recentHistory: string[];
   currentTrack: Track | null;
   isPlaying: boolean;
   favorites: string[];
@@ -35,11 +24,28 @@ interface DiscoverViewProps {
   onSelectPlaylist: (playlist: Playlist) => void;
   onOpenAddToPlaylistModal: (track: Track) => void;
   onOpenDownload?: (track: Track) => void;
+  onNavigateSearch: (keyword: string) => void;
+  onNavigate: (path: string) => void;
+}
+
+/** Date-seeded deterministic shuffle so "每日推荐" is stable within a day. */
+function pickDaily(tracks: Track[], count: number): Track[] {
+  if (tracks.length <= count) return [...tracks];
+  const daySeed = Math.floor(Date.now() / 86400000);
+  const scored = tracks.map((t, i) => {
+    let h = (daySeed * 2654435761 + i * 40503) >>> 0;
+    h ^= h >>> 13;
+    h = (h * 1274126177) >>> 0;
+    return { t, k: h };
+  });
+  return scored.sort((a, b) => a.k - b.k).slice(0, count).map((s) => s.t);
 }
 
 export const DiscoverView: React.FC<DiscoverViewProps> = ({
   tracks,
   playlists,
+  heroTracks,
+  recentHistory,
   currentTrack,
   isPlaying,
   favorites,
@@ -51,315 +57,160 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
   onSelectPlaylist,
   onOpenAddToPlaylistModal,
   onOpenDownload,
+  onNavigateSearch,
+  onNavigate,
 }) => {
   const [selectedCategoryId, setSelectedCategoryId] = useState('all');
-  const [heroIndex, setHeroIndex] = useState(0);
-
-  const heroTracks = useMemo(() => getHeroTracks(), []);
-  const trendingTracks = useMemo(() => getTrendingTracks(), []);
-  const featuredTrack = heroTracks[heroIndex] || heroTracks[0];
-
   const selectedCategory = GENRE_CATEGORIES.find((c) => c.id === selectedCategoryId) || GENRE_CATEGORIES[0];
 
-  const filteredTracks = useMemo(
-    () => filterTracksByGenre(trendingTracks, selectedCategory),
-    [trendingTracks, selectedCategory]
-  );
+  const filteredTracks = useMemo(() => {
+    if (!selectedCategory.filterKeywords.length) return tracks.slice(0, 16);
+    const kw = selectedCategory.filterKeywords[0].toLowerCase();
+    return tracks
+      .filter(
+        (t) =>
+          t.genre?.toLowerCase().includes(kw) ||
+          t.title?.toLowerCase().includes(kw) ||
+          t.artist?.toLowerCase().includes(kw)
+      )
+      .slice(0, 16);
+  }, [tracks, selectedCategory]);
 
-  const handleFavorite = (track: Track) => {
-    const isFav = favorites.includes(track.id);
-    if (!isFav) {
-      confetti({
-        particleCount: 30,
-        spread: 50,
-        origin: { y: 0.8 },
-        colors: ['#ec4899', '#a855f7'],
-      });
-    }
-    onToggleFavorite(track);
+  const scrollToId = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const handleDailyRecommend = () => {
+    const picks = pickDaily(tracks, 20);
+    if (picks.length > 0) onPlayAll(picks);
   };
 
   return (
     <div className="space-y-8 pb-12">
-      {/* Featured Hero Banner */}
-      {featuredTrack && (
-        <div className="relative rounded-3xl overflow-hidden bg-black/40 border border-white/10 backdrop-blur-2xl shadow-2xl p-6 sm:p-8 md:p-10 flex flex-col md:flex-row items-center justify-between gap-6">
-          {/* Ambient Glow */}
-          <div
-            className="absolute inset-0 bg-cover bg-center blur-2xl opacity-25 -z-10 scale-110"
-            style={{ backgroundImage: `url(${normalizeCoverUrl(featuredTrack.coverUrl)})` }}
-          />
-          <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/50 to-transparent -z-10" />
+      {/* 1. Hero banner carousel (official-source hero tracks) */}
+      <BannerCarousel
+        tracks={heroTracks.length > 0 ? heroTracks : tracks.slice(0, 3)}
+        currentTrack={currentTrack}
+        isPlaying={isPlaying}
+        onPlayTrack={onPlayTrack}
+        onShuffleAll={onShuffleAll}
+        onAddToQueue={onAddToQueue}
+      />
 
-          {/* Left Text & Call-To-Action */}
-          <div className="max-w-xl space-y-4">
-            <div className="flex items-center gap-2">
-              <span className="px-3.5 py-1 rounded-full text-xs font-semibold bg-white/10 text-emerald-300 border border-white/15 backdrop-blur-md flex items-center gap-1.5 shadow-sm">
-                <Sparkles className="w-3.5 h-3.5 text-emerald-400" /> 焦点新声 · 精选首播
-              </span>
-              <span className="text-xs text-slate-400 font-mono">{featuredTrack.genre}</span>
-            </div>
+      {/* 2. Quick entry tiles */}
+      <QuickEntry
+        onDailyRecommend={handleDailyRecommend}
+        onNavigate={onNavigate}
+        scrollToId={scrollToId}
+      />
 
-            <h2 className="text-2xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">
-              {featuredTrack.title}
-            </h2>
+      {/* 3. Genre pills (collapsed row) */}
+      <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-1 px-1">
+        {GENRE_CATEGORIES.map((cat) => (
+          <button
+            key={cat.id}
+            onClick={() => {
+              if (cat.filterKeywords.length > 0) {
+                setSelectedCategoryId(cat.id);
+                onNavigateSearch(cat.filterKeywords[0]);
+              } else {
+                setSelectedCategoryId(cat.id);
+              }
+            }}
+            className={`shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold border transition ${
+              selectedCategoryId === cat.id
+                ? 'bg-indigo-500 border-indigo-400 text-white shadow shadow-indigo-900/40'
+                : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            {cat.name}
+          </button>
+        ))}
+      </div>
 
-            <p className="text-sm text-slate-300 line-clamp-2 leading-relaxed">
-              由 {featuredTrack.artist} 倾情呈现，收录于《{featuredTrack.album}》，高保真无损解析，带给你触及灵魂的听觉盛宴。
-            </p>
+      {/* 4. Official toplist (v2 API) */}
+      <ToplistSection
+        favorites={favorites}
+        localTracks={tracks}
+        currentTrack={currentTrack}
+        isPlaying={isPlaying}
+        onPlayTrack={onPlayTrack}
+        onPlayAll={onPlayAll}
+        onAddToQueue={onAddToQueue}
+        onToggleFavorite={onToggleFavorite}
+        onOpenAddToPlaylistModal={onOpenAddToPlaylistModal}
+        onOpenDownload={onOpenDownload}
+      />
 
-            <div className="flex flex-wrap items-center gap-3 pt-2">
-              <button
-                onClick={() => onPlayTrack(featuredTrack)}
-                className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-slate-100 text-black font-bold rounded-full shadow-xl shadow-white/10 transition transform hover:scale-105 active:scale-95"
-              >
-                {currentTrack?.id === featuredTrack.id && isPlaying ? (
-                  <>
-                    <Pause className="w-5 h-5 fill-current" />
-                    <span>暂停播放</span>
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-5 h-5 fill-current ml-0.5" />
-                    <span>立即试听</span>
-                  </>
-                )}
-              </button>
+      {/* 5. Curated playlists */}
+      <PlaylistSection
+        playlists={playlists}
+        tracks={tracks}
+        loading={false}
+        onSelectPlaylist={onSelectPlaylist}
+        onPlayPlaylistFirst={(pl) => {
+          const first = pl.trackIds
+            .map((id) => tracks.find((t) => t.id === id))
+            .find((t): t is Track => Boolean(t));
+          if (first) onPlayTrack(first);
+        }}
+      />
 
-              <button
-                onClick={() => onPlayAll(tracks)}
-                className="flex items-center gap-2 px-5 py-3 bg-white/10 hover:bg-white/15 text-white font-medium rounded-full border border-white/15 backdrop-blur-md transition"
-              >
-                <Shuffle className="w-4 h-4 text-emerald-400" />
-                <span>随机播放全部</span>
-              </button>
-            </div>
+      {/* 6. Recently played (hidden when empty) */}
+      <RecentSection
+        recentHistory={recentHistory}
+        tracks={tracks}
+        currentTrack={currentTrack}
+        isPlaying={isPlaying}
+        favorites={favorites}
+        onPlayTrack={onPlayTrack}
+        onAddToQueue={onAddToQueue}
+        onToggleFavorite={onToggleFavorite}
+        onOpenAddToPlaylistModal={onOpenAddToPlaylistModal}
+        onOpenDownload={onOpenDownload}
+      />
+
+      {/* 7. Category tracks (compact grid for the selected pill) */}
+      {filteredTracks.length > 0 && (
+        <section>
+          <div className="flex items-center gap-2.5 mb-4">
+            <Music className="w-5 h-5 text-indigo-400" />
+            <h3 className="text-lg font-bold text-white tracking-tight">{selectedCategory.name}</h3>
+            <Sparkles className="w-4 h-4 text-slate-500 ml-auto" />
           </div>
-
-          {/* Right Album Artwork with disc ring */}
-          <div className="relative flex-shrink-0 group cursor-pointer" onClick={() => onPlayTrack(featuredTrack)}>
-            <div className="w-48 h-48 sm:w-56 sm:h-56 rounded-3xl overflow-hidden shadow-2xl border-2 border-white/20 relative backdrop-blur-sm">
-              <ImageWithFallback
-                src={normalizeCoverUrl(featuredTrack.coverUrl)}
-                alt={featuredTrack.title}
-                className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
-              />
-              <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition flex items-center justify-center backdrop-blur-xs">
-                <div className="p-4 bg-white text-black rounded-full shadow-lg font-bold">
-                  <Play className="w-6 h-6 fill-current ml-0.5" />
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+            {filteredTracks.map((track) => (
+              <button
+                key={track.id}
+                onClick={() => onPlayTrack(track)}
+                className={`group text-left rounded-2xl p-3 transition cursor-pointer ${
+                  currentTrack?.id === track.id
+                    ? 'bg-indigo-500/15 ring-1 ring-indigo-400/40'
+                    : 'bg-white/5 hover:bg-white/10'
+                }`}
+              >
+                <div className="mb-2 aspect-square overflow-hidden rounded-xl bg-black/30">
+                  <img
+                    src={track.coverUrl}
+                    alt={track.title}
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                    className="h-full w-full object-cover"
+                  />
                 </div>
-              </div>
-            </div>
-
-            {/* Pagination dots for banner */}
-            <div className="flex justify-center gap-2 mt-3">
-              {heroTracks.map((_, i) => (
-                <button
-                  key={i}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setHeroIndex(i);
-                  }}
-                  className={`h-1.5 rounded-full transition-all ${
-                    heroIndex === i ? 'w-6 bg-emerald-400' : 'w-2 bg-white/20 hover:bg-white/40'
-                  }`}
-                />
-              ))}
-            </div>
+                <p className={`truncate text-sm font-semibold ${currentTrack?.id === track.id ? 'text-indigo-300' : 'text-white'}`}>
+                  {track.title}
+                </p>
+                <p className="truncate text-xs text-slate-400 mt-0.5">{track.artist}</p>
+              </button>
+            ))}
           </div>
-        </div>
+        </section>
       )}
 
-      {/* Genre Filter Pills */}
-      <div>
-        <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
-          {GENRE_CATEGORIES.map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => setSelectedCategoryId(cat.id)}
-              className={`px-4 py-2 rounded-full text-xs font-medium whitespace-nowrap transition flex items-center gap-2 ${
-                selectedCategoryId === cat.id
-                  ? 'bg-white text-black font-bold shadow-lg shadow-white/10 border border-white'
-                  : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white border border-white/10 backdrop-blur-md'
-              }`}
-            >
-              <span>{cat.name}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Featured Playlists Grid */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-emerald-400" />
-            <h3 className="text-xl font-bold text-white">推荐歌单</h3>
-          </div>
-          <span className="text-xs text-slate-400 font-medium">精心挑选与编辑</span>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-          {playlists.map((pl) => (
-            <div
-              key={pl.id}
-              onClick={() => onSelectPlaylist(pl)}
-              className="group relative bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-3xl p-3.5 cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl backdrop-blur-xl shadow-black/40"
-            >
-              {/* Cover with hover play button */}
-              <div className="relative aspect-square rounded-2xl overflow-hidden mb-3 bg-white/5 ring-1 ring-white/10">
-                <ImageWithFallback
-                  src={normalizeCoverUrl(pl.coverUrl)}
-                  alt={pl.name}
-                  className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
-                />
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const plTracks = tracks.filter((t) => pl.trackIds.includes(t.id));
-                    if (plTracks.length > 0) onPlayAll(plTracks);
-                  }}
-                  className="absolute bottom-2 right-2 p-3 bg-white text-black rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-y-2 group-hover:translate-y-0 font-bold"
-                >
-                  <Play className="w-4 h-4 fill-current ml-0.5" />
-                </button>
-              </div>
-
-              <h4 className="text-sm font-semibold text-white truncate group-hover:text-emerald-300 transition">
-                {pl.name}
-              </h4>
-              <p className="text-xs text-slate-400 line-clamp-2 mt-1 leading-relaxed">
-                {pl.description}
-              </p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Top Trending Music Table */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <Flame className="w-5 h-5 text-emerald-400" />
-            <h3 className="text-xl font-bold text-white">热播榜单 · 新歌速递</h3>
-          </div>
-          <button
-            onClick={() => onPlayAll(filteredTracks)}
-            className="flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 font-medium transition"
-          >
-            <Play className="w-3.5 h-3.5 fill-current" />
-            播放本组全部 ({filteredTracks.length})
-          </button>
-        </div>
-
-        <div className="bg-white/5 backdrop-blur-2xl rounded-3xl border border-white/10 overflow-hidden shadow-2xl">
-          <div className="divide-y divide-white/5">
-            {filteredTracks.map((track, idx) => {
-              const isCurrent = currentTrack?.id === track.id;
-              const isFav = favorites.includes(track.id);
-
-              return (
-                <div
-                  key={track.id}
-                  onClick={() => onPlayTrack(track)}
-                  className={`group flex items-center justify-between p-3 sm:px-5 hover:bg-white/10 transition cursor-pointer ${
-                    isCurrent ? 'bg-white/10' : ''
-                  }`}
-                >
-                  {/* Left info */}
-                  <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
-                    <span className="w-6 text-center text-xs font-mono font-bold text-slate-500 flex-shrink-0">
-                      {isCurrent ? (
-                        isPlaying ? (
-                          <Volume2 className="w-4 h-4 text-emerald-400 animate-pulse mx-auto" />
-                        ) : (
-                          <Play className="w-4 h-4 text-emerald-400 mx-auto" />
-                        )
-                      ) : (
-                        idx + 1
-                      )}
-                    </span>
-
-                    <div className="relative w-11 h-11 rounded-xl overflow-hidden flex-shrink-0 shadow-sm bg-white/5 ring-1 ring-white/10">
-                      <ImageWithFallback
-                        src={normalizeCoverUrl(track.coverUrl)}
-                        alt={track.title}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-
-                    <div className="min-w-0 flex-1 pr-2">
-                      <div className={`text-sm font-semibold truncate ${isCurrent ? 'text-emerald-300' : 'text-white'}`}>
-                        {track.title}
-                      </div>
-                      <div className="text-xs text-slate-400 truncate mt-0.5">
-                        {track.artist} · <span className="text-slate-500">{track.album}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Genre Tag (hidden on small mobile) */}
-                  <div className="hidden md:block w-32 text-xs text-slate-400 truncate">
-                    {track.genre}
-                  </div>
-
-                  {/* Actions & Duration */}
-                  <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenDownload?.(track);
-                      }}
-                      className="p-1.5 text-slate-400 hover:text-emerald-400 rounded-lg hover:bg-white/10 transition"
-                      title="下载音乐 / 歌词"
-                    >
-                      <Download className="w-4 h-4" />
-                    </button>
-
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onAddToQueue(track);
-                      }}
-                      className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 transition"
-                      title="添加到播放队列"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
-
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenAddToPlaylistModal(track);
-                      }}
-                      className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 transition hidden sm:block"
-                      title="收藏到歌单"
-                    >
-                      <ListPlus className="w-4 h-4" />
-                    </button>
-
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleFavorite(track);
-                      }}
-                      className={`p-1.5 rounded-lg transition ${
-                        isFav ? 'text-pink-400' : 'text-slate-500 hover:text-white'
-                      }`}
-                      title={isFav ? '取消喜欢' : '加入喜欢'}
-                    >
-                      <Heart className={`w-4 h-4 ${isFav ? 'fill-current' : ''}`} />
-                    </button>
-
-                    <span className="text-xs font-mono text-slate-400 w-12 text-right">
-                      {formatTime(track.duration)}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+      <div className="flex items-center justify-center gap-2 pt-2 text-xs text-slate-500">
+        <ListMusic className="w-3.5 h-3.5" />
+        <span>音源来自酷我音乐 / 网易云音乐官方接口 · 仅供个人欣赏</span>
       </div>
     </div>
   );

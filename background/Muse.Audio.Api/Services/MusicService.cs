@@ -304,14 +304,15 @@ public class MusicService
             var newApiUrl = await ResolveKuwoViaNewApiAsync(rid, level);
             if (!string.IsNullOrEmpty(newApiUrl)) return newApiUrl;
 
-            // 兜底：haitangw/nxinxz return full audio directly; antiserver returns only a preview URL
+            // 兜底：haitangw/nxinxz return full audio directly.
+            // NOTE: antiserver.kuwo.cn/anti.s 已废弃——恒返回同一 0.17MB 占位音
+            // （忽略 rid/br），绝不能再作为降级候选。
             var urlCandidates = new[]
             {
                 $"https://musicapi.haitangw.net/music/kw.php?type=mp3&id={rid}&level={lvlMp3}",
                 $"http://music.nxinxz.com/kw.php?id={rid}&level={lvlMp3}&type=mp3",
                 $"https://musicapi.haitangw.net/music/kw.php?type=mp3&id={rid}&level=standard",
-                $"http://music.nxinxz.com/kw.php?id={rid}&level=standard&type=mp3",
-                $"http://antiserver.kuwo.cn/anti.s?type=convert_url&rid={rid}&format=mp3&response=url"
+                $"http://music.nxinxz.com/kw.php?id={rid}&level=standard&type=mp3"
             };
             foreach (var c in urlCandidates)
             {

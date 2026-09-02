@@ -13,7 +13,9 @@ import { audioEngine } from './utils/audioEngine';
 import { setPlaybackState, initNativePlayback, isNativePlayback } from './utils/nativeAudio';
 import { getNativeSnapshot } from './utils/nativeAudio';
 import { apiUrl } from './utils/apiBase';
-import { mergeTranslationLyrics } from './utils/lyricsParser';
+import { applyV2Quality, v2Lyric } from './utils/apiV2';
+import { dismissSplash } from './utils/splash';
+import { timeStore } from './utils/timeStore';
 import {
   parseScriptMetadata,
   SourceScriptRunner,
@@ -91,6 +93,7 @@ export default function App() {
   // --- Persistent & Core State ---
   const [tracks, setTracks] = useState<Track[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [heroTracks, setHeroTracks] = useState<Track[]>([]);
   const [dataLoaded, setDataLoaded] = useState(false);
 
   // Load discovery data from .NET backend on mount
@@ -105,6 +108,8 @@ export default function App() {
 
         const apiTracks: Track[] = data.trendingTracks || [];
         const apiPlaylists: Playlist[] = data.playlists || [];
+        const apiHeroTracks: Track[] = data.heroTracks || apiTracks.slice(0, 3);
+        setHeroTracks(apiHeroTracks);
 
         // Merge with user-imported local tracks from localStorage
         const saved = localStorage.getItem('wavesound_local_tracks');
@@ -117,6 +122,7 @@ export default function App() {
         setPlaylists([...apiPlaylists, ...customPlaylists]);
 
         setDataLoaded(true);
+        dismissSplash();
       } catch (err) {
         clearTimeout(timeout);
         console.error('Failed to load discovery data:', err);
@@ -126,6 +132,7 @@ export default function App() {
         const savedPl = localStorage.getItem('wavesound_custom_playlists');
         if (savedPl) { try { setPlaylists(JSON.parse(savedPl)); } catch {} }
         setDataLoaded(true);
+        dismissSplash();
       }
     }
     loadDiscovery();
@@ -216,8 +223,11 @@ export default function App() {
   const [nativeDiag, setNativeDiag] = useState<{ engaged: boolean; ticks: number } | null>(null);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
+  // Continuous playback time lives in timeStore (src/utils/timeStore.ts), NOT in
+  // React state: feeding it through App state re-rendered the whole tree at
+  // 60fps. Only components that display time subscribe via useAudioTime().
   const [duration, setDuration] = useState(0);
+  const lastDurationRef = useRef(0);
   const [volume, setVolume] = useState(0.85);
   const [isMuted, setIsMuted] = useState(false);
   const [playbackMode, setPlaybackMode] = useState<PlaybackMode>('sequence');
@@ -279,7 +289,7 @@ export default function App() {
     navigate(`/playlist/${encodeURIComponent(pl.id)}`);
   }, [navigate]);
 
-  const [searchQuery, setSearchQuery] = useState('野花野草');
+  const [searchQuery, setSearchQuery] = useState('');
   const [isFullScreenPlayerOpen, setIsFullScreenPlayerOpen] = useState(false);
   const [isEQModalOpen, setIsEQModalOpen] = useState(false);
   const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState(false);
@@ -403,22 +413,14 @@ export default function App() {
       ) {
         try {
           const songId = resolvedTrack.sourceRawInfo.id;
-          const lrcRes = await fetch(
-            apiUrl(`/api/music/lyric?source=${resolvedTrack.sourceKey || 'netease'}&id=${encodeURIComponent(
-              songId
-            )}&rid=${encodeURIComponent(songId)}`)
-          );
-          if (lrcRes.ok) {
-            const lrcData = await lrcRes.json();
-            if (lrcData && lrcData.lrc) {
-              resolvedTrack.lyrics = lrcData.lrc;
-              // Merge translation lyrics if available
-              if (lrcData.tlyric) {
-                const parsedLyrics = await import('./utils/lyricsParser').then(m => m.parseLRC(lrcData.lrc));
-                const merged = mergeTranslationLyrics(parsedLyrics, lrcData.tlyric);
-                // Store translation info in the lyrics string (appended as metadata)
-                resolvedTrack.lyrics = lrcData.lrc + '\n---tlyric---\n' + (lrcData.tlyric || '');
-              }
+          // v2 client handles both API versions internally (v1 rollback-safe)
+          // and returns { lrc, translation }.
+          const lrcData = await v2Lyric(resolvedTrack.sourceKey || 'kw', songId);
+          if (lrcData.lrc) {
+            resolvedTrack.lyrics = lrcData.lrc;
+            // Store translation info in the lyrics string (appended as metadata)
+            if (lrcData.translation) {
+              resolvedTrack.lyrics = lrcData.lrc + '\n---tlyric---\n' + lrcData.translation;
             }
           }
         } catch (lrcErr) {
@@ -427,7 +429,8 @@ export default function App() {
       }
 
       setCurrentTrack(resolvedTrack);
-      setCurrentTime(0);
+      timeStore.reset(resolvedTrack.duration);
+      lastDurationRef.current = resolvedTrack.duration;
       setDuration(resolvedTrack.duration);
 
       // Add to queue if not present
@@ -449,7 +452,12 @@ export default function App() {
       const q = audioSettingsRef.current.quality || 'high';
       let finalAudioUrl = resolvedTrack.audioUrl;
 
-      if (resolvedTrack.audioUrl.includes('/api/music/stream')) {
+      if (resolvedTrack.audioUrl.includes('/api/v2/song/url')) {
+        // v2 official-channel link: quality is encoded in the URL and the
+        // backend 302-redirects straight to the official CDN — no second
+        // resolution, no CORS probe needed (works for AVPlayer/HTML5 alike).
+        finalAudioUrl = applyV2Quality(resolvedTrack.audioUrl, q);
+      } else if (resolvedTrack.audioUrl.includes('/api/music/stream')) {
         const src = resolvedTrack.sourceKey || (resolvedTrack.id.startsWith('ne_') ? 'netease' : 'kuwo');
         const rid =
           resolvedTrack.sourceRawInfo?.id ||
@@ -517,15 +525,19 @@ export default function App() {
     handlePlayTrackRef.current = handlePlayTrack;
   }, [handlePlayTrack]);
 
-  // Periodic time update listener
+  // Periodic time update listener — feeds timeStore (throttled notifications),
+  // only duration changes bubble into React state (~once per track).
   useEffect(() => {
     let animId: number;
     const update = () => {
       if (isPlaying) {
-        const cur = audioEngine.getCurrentTime();
+        timeStore.setTime(audioEngine.getCurrentTime());
         const dur = audioEngine.getDuration();
-        setCurrentTime(cur);
-        if (dur > 0) setDuration(dur);
+        if (dur > 0 && dur !== lastDurationRef.current) {
+          lastDurationRef.current = dur;
+          setDuration(dur);
+          timeStore.setDuration(dur);
+        }
       }
       animId = requestAnimationFrame(update);
     };
@@ -565,21 +577,25 @@ export default function App() {
 
   // Native background-audio bridge (iOS): activate AVAudioSession playback,
   // keep lock-screen Now Playing metadata in sync. No-op in browser/desktop.
-  // Throttled to at most once per second to avoid 60fps IPC spam.
+  // Position is read directly from timeStore on a 1s interval — the effect
+  // must NOT depend on per-frame time state.
   useEffect(() => {
-    const now = Date.now();
-    if (now - lastPlaybackSyncRef.current < 1000) return;
-    lastPlaybackSyncRef.current = now;
-    setPlaybackState({
-      playing: isPlaying,
-      title: currentTrack?.title ?? 'MUSE.AUDIO',
-      artist: currentTrack?.artist ?? '',
-      album: currentTrack?.album ?? undefined,
-      duration: duration > 0 ? duration : undefined,
-      position: currentTime,
-      streamUrl: currentTrack?.audioUrl ?? undefined,
-    });
-  }, [isPlaying, currentTrack, duration, currentTime]);
+    const sync = () => {
+      setPlaybackState({
+        playing: isPlaying,
+        title: currentTrack?.title ?? 'MUSE.AUDIO',
+        artist: currentTrack?.artist ?? '',
+        album: currentTrack?.album ?? undefined,
+        duration: duration > 0 ? duration : undefined,
+        position: timeStore.getTime(),
+        streamUrl: currentTrack?.audioUrl ?? undefined,
+      });
+    };
+    sync();
+    if (!isPlaying) return;
+    const iv = setInterval(sync, 1000);
+    return () => clearInterval(iv);
+  }, [isPlaying, currentTrack, duration]);
 
   // Initialize native (iOS AVPlayer) playback on mount. On success, all
   // subsequent play/pause/seek/loadTrack calls are routed through the native
@@ -805,7 +821,7 @@ export default function App() {
 
   // Previous Track
   const handlePrev = () => {
-    if (currentTime > 3) {
+    if (timeStore.getTime() > 3) {
       handleSeek(0);
       return;
     }
@@ -817,7 +833,7 @@ export default function App() {
 
   // Seek
   const handleSeek = (seconds: number) => {
-    setCurrentTime(seconds);
+    timeStore.setTime(seconds, true); // instant visual feedback, bypass throttle
     audioEngine.seek(seconds);
   };
 
@@ -1100,6 +1116,8 @@ export default function App() {
                   <DiscoverView
                     tracks={tracks}
                     playlists={playlists}
+                    heroTracks={heroTracks}
+                    recentHistory={recentHistory}
                     currentTrack={currentTrack}
                     isPlaying={isPlaying}
                     favorites={favorites}
@@ -1114,6 +1132,11 @@ export default function App() {
                       setIsPlaylistModalOpen(true);
                     }}
                     onOpenDownload={handleOpenDownload}
+                    onNavigateSearch={(kw) => {
+                      setSearchQuery(kw);
+                      navigate('/search');
+                    }}
+                    onNavigate={(path) => navigate(path)}
                   />
                 }
               />
@@ -1264,7 +1287,6 @@ export default function App() {
               <BottomPlayerBar
                 track={currentTrack}
                 isPlaying={isPlaying}
-                currentTime={currentTime}
                 duration={duration}
                 volume={volume}
                 isMuted={isMuted}
@@ -1308,7 +1330,6 @@ export default function App() {
         onClose={() => setIsFullScreenPlayerOpen(false)}
         track={currentTrack}
         isPlaying={isPlaying}
-        currentTime={currentTime}
         duration={duration}
         volume={volume}
         isMuted={isMuted}

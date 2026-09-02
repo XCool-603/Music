@@ -65,6 +65,34 @@
   height: 0;
 }
 
+/* Alias used by horizontal scrollers (carousels, tab strips) */
+.scrollbar-hide {
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* === Shared keyframes for the redesigned pages === */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes eqbar {
+  0%,
+  100% {
+    transform: scaleY(0.5);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
 /* === Global Custom Range Slider === */
 input[type="range"] {
   --slider-accent: #10b981;

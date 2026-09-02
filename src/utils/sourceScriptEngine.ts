@@ -2,6 +2,7 @@ import CryptoJS from 'crypto-js';
 import { CustomSourceScript, Track } from '../types';
 import { normalizeCoverUrl } from './imageUtils';
 import { getApiBase } from './apiBase';
+import { API_V2 } from './apiV2';
 
 /**
  * 洛雪音乐 (LX Music) 自定义音源 JS 脚本执行与兼容引擎
@@ -847,55 +848,95 @@ export class SourceScriptRunner {
 export async function searchAggregatedOnlineMusic(
   query: string,
   activeScripts: CustomSourceScript[],
-  platform: 'all' | 'kuwo' | 'netease' = 'all'
+  platform: 'all' | 'kuwo' | 'netease' = 'all',
+  page = 1
 ): Promise<Track[]> {
   const trimmed = (query || '').trim();
   if (!trimmed) return [];
 
+  const enabledScripts = (activeScripts || []).filter((s) => s.enabled);
+  // 去重游标：以后端 rid / 脚本 id 作为稳定键，避免同一首歌被反复折叠重复。
+  const seen = new Set<string>();
+  const pushUnique = (t: Track) => {
+    const key = t.sourceRawInfo?.id || t.id || '';
+    if (!key) {
+      results.push(t);
+      return;
+    }
+    if (!seen.has(key)) {
+      seen.add(key);
+      results.push(t);
+    }
+  };
+
   const results: Track[] = [];
 
-  // 1. 优先调用后端全长无损音乐库检索 (真实全长 3~5 分钟完整原曲 + 动态逐字 LRC 歌词 + 高清封面)
+  // 1. 洛雪 / 用户 JS 音源脚本为「主检索源」，结果置前。每个脚本在沙箱中独立
+  //    执行，搜索命中即优先采用（真正让洛雪脚本成为前端主力检索链路）。
+  for (const script of enabledScripts) {
+    try {
+      const runner = new SourceScriptRunner(script);
+      const initRes = await runner.init();
+      if (initRes.success && runner.hasSearchAction()) {
+        const customResults = await runner.search(trimmed, page);
+        customResults.forEach(pushUnique);
+      }
+    } catch (e) {
+      console.warn(`[Aggregator] Script ${script.name} search failed:`, e);
+    }
+  }
+
+  // 2. 后台音乐库兜底检索（v2 走官方上游 /api/v2/search，v1 走老端点 /api/music/search）。
+  //    只有当脚本没有命中足够结果时才作为补充，保证“洛雪为主、后台兜底”。
+  const backendRaw: any[] = [];
   try {
-    const res = await fetch(`${getApiBase()}/api/music/search?q=${encodeURIComponent(trimmed)}&limit=30&source=${platform}`);
+    const searchUrl = API_V2
+      ? `${getApiBase()}/api/v2/search?q=${encodeURIComponent(trimmed)}&page=${page}&limit=30&source=${platform}`
+      : `${getApiBase()}/api/music/search?q=${encodeURIComponent(trimmed)}&page=${page}&limit=30&source=${platform}`;
+    const res = await fetch(searchUrl);
     if (res.ok) {
       const data = await res.json();
-      if (data && Array.isArray(data.list) && data.list.length > 0) {
-        const primaryScript = activeScripts.find((s) => s.enabled) || activeScripts[0];
-
-        data.list.forEach((item: any) => {
-          const finalCover = normalizeCoverUrl(item.coverUrl);
-          results.push({
-            id: item.id,
-            title: item.title,
-            artist: item.artist,
-            album: item.album,
-            duration: item.duration || 240,
-            coverUrl: finalCover,
-            audioUrl: item.audioUrl,
-            genre: item.genre || '流行音乐',
-            lyrics: '', // 播放时自动流式请求真实完整 LRC 歌词
-            bitrate: item.bitrate || '320kbps / 无损全长',
-            sourceScriptId: primaryScript?.id,
-            sourceName: item.sourceName || (item.sourceKey === 'kw' ? '酷我音乐' : '网易云音乐'),
-            sourceKey: item.sourceKey || 'kw',
-            sourceRawInfo: {
-              id: item.rid || item.id,
-              songmid: item.rid || item.id,
-              name: item.title,
-              singer: item.artist,
-              albumName: item.album,
-              interval: item.duration,
-              img: finalCover,
-            },
-          });
-        });
-      }
+      const raw = Array.isArray(data?.tracks) ? data.tracks : Array.isArray(data?.list) ? data.list : [];
+      backendRaw.push(...raw);
     }
   } catch (err) {
     console.log('[Aggregator] Backend full search fallback:', err);
   }
 
-  // 2. 如果后端未检索到，回退至 iTunes Open Music 备用检索
+  if (backendRaw.length > 0) {
+    backendRaw.forEach((item: any) => {
+      const finalCover = normalizeCoverUrl(item.coverUrl);
+      const t: Track = {
+        id: item.id,
+        title: item.title,
+        artist: item.artist,
+        album: item.album,
+        duration: item.duration || 240,
+        coverUrl: finalCover,
+        audioUrl: item.audioUrl,
+        genre: item.genre || '流行音乐',
+        lyrics: '', // 播放时自动流式请求真实完整 LRC 歌词
+        bitrate: item.bitrate || '320kbps / 无损全长',
+        sourceScriptId: undefined,
+        sourceName: item.sourceName || (item.sourceKey === 'kw' ? '酷我音乐' : '网易云音乐'),
+        sourceKey: item.sourceKey || 'kw',
+        sourceRawInfo: {
+          id: item.rid || item.id,
+          songmid: item.rid || item.id,
+          name: item.title,
+          singer: item.artist,
+          albumName: item.album,
+          interval: item.duration,
+          img: finalCover,
+        },
+      };
+      // 若前端没有启用任何洛雪脚本，则后台结果直接作为唯一真实音源；
+      // 若已有脚本命中同一 rid，则跳过（脚本优先）。
+      pushUnique(t);
+    });
+  }
+
+  // 3. 最后一级开放兜底：当脚本与后台都为空时才回退到 iTunes 试听源。
   if (results.length === 0) {
     try {
       let itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(trimmed)}&entity=song&limit=25&country=CN`;
@@ -909,29 +950,24 @@ export async function searchAggregatedOnlineMusic(
       }
 
       if (data && data.results && Array.isArray(data.results)) {
-        const primaryScript = activeScripts.find((s) => s.enabled) || activeScripts[0];
-
         data.results.forEach((item: any) => {
           const highResCover = item.artworkUrl100
             ? item.artworkUrl100.replace('100x100bb.jpg', '600x600bb.jpg')
             : 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&auto=format&fit=crop&q=80';
 
-          const trackId = `itunes_${item.trackId}`;
-          const rawAudio = item.previewUrl || '';
-
-          results.push({
-            id: trackId,
+          const t: Track = {
+            id: `itunes_${item.trackId}`,
             title: item.trackName || '未知单曲',
             artist: item.artistName || '未知歌手',
             album: item.collectionName || '单曲合辑',
             duration: Math.round((item.trackTimeMillis || 180000) / 1000),
             coverUrl: highResCover,
-            audioUrl: rawAudio,
+            audioUrl: item.previewUrl || '',
             genre: item.primaryGenreName || '流行音乐',
-            lyrics: `[00:00.00]${item.trackName || '单曲'} - ${item.artistName || '未知歌手'}\n[00:03.00]专辑: ${item.collectionName || '单曲合辑'}\n[00:06.00]音源解析: ${primaryScript ? primaryScript.name : '开放音频聚合引擎'}\n[00:10.00]高保真原声音频流已就绪 (AAC 256k / FLAC)\n[00:20.00]正在同步声学动态频谱与无损均衡器...`,
+            lyrics: `[00:00.00]${item.trackName || '单曲'} - ${item.artistName || '未知歌手'}\n[00:03.00]专辑: ${item.collectionName || '单曲合辑'}\n[00:10.00]高保真原声音频流已就绪 (AAC 256k / FLAC)`,
             bitrate: '320k',
-            sourceScriptId: primaryScript?.id,
-            sourceName: primaryScript ? primaryScript.name : '多源聚合库',
+            sourceScriptId: undefined,
+            sourceName: 'iTunes 开放试听',
             sourceKey: 'wy',
             sourceRawInfo: {
               id: String(item.trackId),
@@ -940,30 +976,14 @@ export async function searchAggregatedOnlineMusic(
               albumName: item.collectionName,
               interval: Math.round((item.trackTimeMillis || 180000) / 1000),
               img: highResCover,
-              audioUrl: rawAudio,
+              audioUrl: item.previewUrl || '',
             },
-          });
+          };
+          pushUnique(t);
         });
       }
     } catch (err) {
       console.log('[Aggregator] Online search fallback:', err);
-    }
-  }
-
-  // 3. 同时使用已启用的用户 JS 音源脚本的 search() 进行检索扩展
-  for (const script of activeScripts) {
-    if (!script.enabled) continue;
-    try {
-      const runner = new SourceScriptRunner(script);
-      const initRes = await runner.init();
-      if (initRes.success && runner.hasSearchAction()) {
-        const customResults = await runner.search(trimmed, 1);
-        if (customResults.length > 0) {
-          results.unshift(...customResults);
-        }
-      }
-    } catch (e) {
-      console.warn(`[Aggregator] Script ${script.name} search failed:`, e);
     }
   }
 
