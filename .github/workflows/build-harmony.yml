@@ -54,7 +54,12 @@ jobs:
 
       - name: Build HAP (release, unsigned)
         working-directory: harmonyos
+        env:
+          npm_config_registry: https://repo.harmonyos.com/npm/
         run: |
+          # 确保安装 ohos 依赖时使用华为 registry(否则 @ohos/* 404)
+          npm config set registry "https://repo.harmonyos.com/npm/" --global
+          cat $HOME/.npmrc || true
           hvigorw clean --no-daemon --accept-license
           hvigorw assembleHap --mode module -p product=default -p buildMode=release --no-daemon --accept-license --stacktrace
 
