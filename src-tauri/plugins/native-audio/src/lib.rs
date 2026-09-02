@@ -93,7 +93,7 @@ pub fn set_playback_state<R: Runtime>(
         let state = app.state::<NativeAudioState<R>>();
         let handle = state.0.lock().unwrap().clone();
         if let Some(handle) = handle {
-            handle.run_mobile_plugin::<()>(
+            if let Err(e) = handle.run_mobile_plugin::<()>(
                 "setPlaybackState",
                 PlaybackStatePayload {
                     playing,
@@ -104,7 +104,9 @@ pub fn set_playback_state<R: Runtime>(
                     position,
                     stream_url,
                 },
-            )?;
+            ) {
+                eprintln!("[MUSE-AUDIO][native-audio] setPlaybackState failed: {e}");
+            }
         }
     }
     #[cfg(not(target_os = "ios"))]
