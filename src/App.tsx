@@ -320,6 +320,9 @@ export default function App() {
   const sleepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPlaybackSyncRef = useRef(0);
   const nativeInitPromiseRef = useRef<Promise<boolean> | null>(null);
+  // One-shot guard: a native playback error first retries through the backend
+  // proxy (staying on AVPlayer); only a second error downgrades to HTML5.
+  const nativeProxyRetryRef = useRef(false);
 
   // Handle track playback loop on end
   const handleTrackEnded = useCallback(() => {
@@ -484,6 +487,12 @@ export default function App() {
       }
 
       audioEngine.setPlaybackRate(playbackSpeed);
+      // Re-arm native (AVPlayer) playback for this track. A previous track may
+      // have been downgraded to HTML5 after errors; HTML5 cannot play in the
+      // background, so every new track gets another chance at native. No-op on
+      // platforms where native playback is unavailable.
+      audioEngine.setNativeMode(true);
+      nativeProxyRetryRef.current = false;
       // Wait for loadTrack to finish setting the source (native or HTML5)
       // before starting playback, avoiding a play-before-source race.
       await audioEngine.loadTrack(
@@ -584,7 +593,22 @@ export default function App() {
         if (cmd === 'prev') handlePrevRef.current();
       },
       onPlaybackError: () => {
-        console.warn('[App] native playback error — falling back to HTML5 for this session');
+        // A native AVPlayer failure must NOT immediately downgrade to HTML5:
+        // HTML5 audio in WKWebView stops as soon as the app is backgrounded.
+        // First retry the same track through the backend proxy while staying
+        // native; only a repeated failure downgrades the session (and the next
+        // handlePlayTrack re-arms native mode).
+        if (!nativeProxyRetryRef.current) {
+          nativeProxyRetryRef.current = true;
+          audioEngine
+            .retryCurrentTrackViaNativeProxy()
+            .then((ok) => {
+              if (!ok) audioEngine.setNativeMode(false);
+            })
+            .catch(() => audioEngine.setNativeMode(false));
+          return;
+        }
+        console.warn('[App] native playback error after proxy retry — falling back to HTML5 for this track');
         audioEngine.setNativeMode(false);
       },
     });

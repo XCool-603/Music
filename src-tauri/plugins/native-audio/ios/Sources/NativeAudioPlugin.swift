@@ -45,7 +45,17 @@ public class NativeAudioPlugin: Plugin {
     errorObserver = NotificationCenter.default.addObserver(
       forName: AVPlayerItem.newErrorLogEntryNotification, object: nil, queue: .main
     ) { [weak self] _ in
-      self?.sendEvent(type: "error", playing: false, position: nil, duration: 0)
+      guard let self = self else { return }
+      // Only treat this as a playback failure when the item actually entered
+      // the `.failed` state. AVPlayer emits error-log entries for recoverable /
+      // transient issues (a single failed variant request, a stalled segment…)
+      // that must NOT kick the session down to HTML5 audio — HTML5 in WKWebView
+      // stops as soon as the app is backgrounded.
+      guard let item = self.player.currentItem, item.status == .failed else { return }
+      Self.log.error(
+        "playback error: item.status=.failed \(item.error?.localizedDescription ?? "unknown", privacy: .public)"
+      )
+      self.sendEvent(type: "error", playing: false, position: nil, duration: 0)
     }
 
     timeObserver = player.addPeriodicTimeObserver(

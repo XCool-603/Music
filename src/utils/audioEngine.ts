@@ -427,6 +427,10 @@ class AudioEngine {
   // graph, which is unused in native mode).
   private nativeMode = false;
   private nativeSnapshot = { playing: false, position: 0, duration: 0 };
+  // Metadata of the track most recently handed to the native AVPlayer, kept so
+  // a native-proxy retry (see retryCurrentTrackViaNativeProxy) can refresh the
+  // lock-screen metadata without a round-trip to the caller.
+  private lastNativeMeta?: { title?: string; artist?: string; album?: string; duration?: number };
 
   constructor() {
     this.initAudioElement();
@@ -674,6 +678,35 @@ class AudioEngine {
     return this.nativeMode && isNativePlayback();
   }
 
+  /**
+   * Retry the current track through the backend audio proxy while STAYING on
+   * the native AVPlayer. Used when the direct CDN URL fails natively (blocked /
+   * expired / ATS trouble): the proxy returns well-formed audio from our own
+   * origin, which AVPlayer can stream. Returns true when the retry source is
+   * loaded and playing. HTML5 fallback is a last resort (it cannot play in the
+   * background), so callers should only downgrade when this returns false.
+   */
+  public async retryCurrentTrackViaNativeProxy(): Promise<boolean> {
+    if (!this.isUsingNativePlayback() || !this.currentRawUrl) return false;
+    const proxyUrl = `${getApiBase()}/api/proxy/audio?url=${encodeURIComponent(this.currentRawUrl)}`;
+    const resumePos = getNativeSnapshot().position || 0;
+    const ok = await nativeSetSource(
+      proxyUrl,
+      {
+        title: this.lastNativeMeta?.title,
+        artist: this.lastNativeMeta?.artist,
+        album: this.lastNativeMeta?.album,
+        duration: this.lastNativeMeta?.duration || 0,
+      },
+      resumePos
+    );
+    if (!ok) return false;
+    await nativePlay();
+    this.nativeSnapshot = { playing: true, position: resumePos, duration: this.lastNativeMeta?.duration || 0 };
+    console.warn('[AudioEngine] native playback retried via backend proxy');
+    return true;
+  }
+
   public async loadTrack(
     url: string,
     onEnded: () => void,
@@ -692,6 +725,7 @@ class AudioEngine {
       // own loading + background playback. If the plugin call fails, fall back to
       // the HTML5 path so the session still works.
       const resumePos = this.getCurrentTime();
+      this.lastNativeMeta = metadata;
       const ok = await nativeSetSource(playUrl, {
         title: metadata?.title,
         artist: metadata?.artist,
