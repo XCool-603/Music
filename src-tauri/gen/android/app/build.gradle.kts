@@ -60,8 +60,24 @@ android {
             }
         }
         getByName("release") {
-            if (keystoreProperties.containsKey("storeFile")) {
-                signingConfig = signingConfigs.getByName("release")
+            val releaseSigning = signingConfigs.getByName("release")
+            val hasSigning = keystoreProperties.containsKey("storeFile")
+                    && releaseSigning.storeFile != null
+                    && keystoreProperties.containsKey("storePassword")
+                    && keystoreProperties.containsKey("keyAlias")
+                    && keystoreProperties.containsKey("keyPassword")
+            if (hasSigning) {
+                signingConfig = releaseSigning
+            } else if (gradle.startParameter.taskNames.any { it.contains("Release") }) {
+                // Never silently produce an unsigned release build. Without a
+                // keystore.properties the release APK/AAB is NOT signed, which
+                // Android refuses to install on most devices and store uploads
+                // reject outright — fail the build instead.
+                throw GradleException(
+                    "Android release signing is not configured.\n" +
+                    "Follow src-tauri/gen/android/app/keystore.properties.template to create " +
+                    "keystore.properties with the release .jks path and credentials."
+                )
             }
             isMinifyEnabled = true
             proguardFiles(

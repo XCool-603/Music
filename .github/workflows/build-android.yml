@@ -67,6 +67,24 @@ jobs:
       - name: Install JS dependencies
         run: npm ci
 
+      - name: Configure Android release signing
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            # keystore.properties is git-ignored; it must be materialized on the
+            # runner. Without it the release variant FAILS (no unsigned builds).
+            base64 -d <<< "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" > src-tauri/gen/android/app/muse-release.jks
+            cat > src-tauri/gen/android/app/keystore.properties <<'EOF'
+storeFile=muse-release.jks
+storePassword=${{ secrets.ANDROID_KEYSTORE_STORE_PASSWORD }}
+keyAlias=${{ secrets.ANDROID_KEYSTORE_KEY_ALIAS }}
+keyPassword=${{ secrets.ANDROID_KEYSTORE_KEY_PASSWORD }}
+EOF
+            echo "Release signing configured from GitHub Secrets."
+          else
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not set. The Android release build REQUIRES signing and will now fail. Add the repository secrets: ANDROID_KEYSTORE_BASE64 (base64 of muse-release.jks), ANDROID_KEYSTORE_STORE_PASSWORD, ANDROID_KEYSTORE_KEY_ALIAS, ANDROID_KEYSTORE_KEY_PASSWORD."
+          fi
+
       - name: Build Android APK
         run: npx tauri android build --apk
 
