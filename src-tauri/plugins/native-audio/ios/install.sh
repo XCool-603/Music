@@ -35,9 +35,8 @@ XCODEPROJ="$(find "$GEN_DIR" -maxdepth 3 -name "*.xcodeproj" -type d | head -n1 
 }
 
 APP_ROOT="$(dirname "$XCODEPROJ")"
-APP_NAME="$(basename "$APP_ROOT")"
-APP_SRC="$APP_ROOT/$APP_NAME"
-PLUGINS_DIR="$APP_SRC/Plugins"
+APP_NAME="$(basename "$XCODEPROJ" .xcodeproj)"
+PLUGINS_DIR="$APP_ROOT/Plugins"
 mkdir -p "$PLUGINS_DIR"
 cp "$SWIFT_SRC" "$PLUGINS_DIR/NativeAudioPlugin.swift"
 echo "Copied -> $PLUGINS_DIR/NativeAudioPlugin.swift"
