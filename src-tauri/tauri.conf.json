@@ -41,7 +41,7 @@
     "macOS": {
       "minimumSystemVersion": "10.15",
       "hardenedRuntime": true,
-      "entitlements": "../entitlements.macos.plist",
+      "entitlements": "entitlements.macos.plist",
       "dmg": {
         "windowSize": {
           "width": 660,
