@@ -5,9 +5,7 @@ import { ImageWithFallback } from './ImageWithFallback';
 import { normalizeCoverUrl } from '../utils/imageUtils';
 import {
   Play,
-  Pause,
   Shuffle,
-  Clock,
   Heart,
   Plus,
   Trash2,

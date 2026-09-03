@@ -10,8 +10,6 @@ import {
   History,
   Play,
   Plus,
-  Trash2,
-  Sparkles,
   Music,
   Volume2,
   Download,

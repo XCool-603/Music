@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Track } from '../types';
-import { Upload, Music, FolderPlus, CheckCircle2, AlertCircle, FileAudio } from 'lucide-react';
+import { Upload, Music, FolderPlus, CheckCircle2, FileAudio } from 'lucide-react';
 
 interface LocalFileImporterProps {
   onImportTracks: (tracks: Track[]) => void;

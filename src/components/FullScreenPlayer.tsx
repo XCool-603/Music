@@ -5,6 +5,7 @@ import { VisualizerCanvas } from './VisualizerCanvas';
 import { formatTime } from '../utils/lyricsParser';
 import { ImageWithFallback } from './ImageWithFallback';
 import { normalizeCoverUrl } from '../utils/imageUtils';
+import { useAudioTime } from '../utils/timeStore';
 import confetti from 'canvas-confetti';
 import {
   ChevronDown,
@@ -16,8 +17,6 @@ import {
   Repeat,
   Repeat1,
   Shuffle,
-  Volume2,
-  VolumeX,
   Sliders,
   Moon,
   ListMusic,
@@ -35,7 +34,6 @@ interface FullScreenPlayerProps {
   onClose: () => void;
   track: Track | null;
   isPlaying: boolean;
-  currentTime: number;
   duration: number;
   volume: number;
   isMuted: boolean;
@@ -64,10 +62,7 @@ export const FullScreenPlayer: React.FC<FullScreenPlayerProps> = ({
   onClose,
   track,
   isPlaying,
-  currentTime,
   duration,
-  volume,
-  isMuted,
   playbackMode,
   playbackSpeed,
   quality,
@@ -76,8 +71,6 @@ export const FullScreenPlayer: React.FC<FullScreenPlayerProps> = ({
   onPrev,
   onNext,
   onSeek,
-  onVolumeChange,
-  onToggleMute,
   onTogglePlaybackMode,
   onChangePlaybackSpeed,
   onChangeQuality,
@@ -87,6 +80,9 @@ export const FullScreenPlayer: React.FC<FullScreenPlayerProps> = ({
   onOpenSleepTimer,
   onOpenDownload,
 }) => {
+  // Playback time is subscribed via the module-singleton timeStore (capped at
+  // 10fps) instead of a prop, so the whole app tree doesn't re-render per tick.
+  const currentTime = useAudioTime();
   const [activeTab, setActiveTab] = useState<'vinyl' | 'lyrics' | 'visualizer'>('vinyl');
   const [visualizerMode, setVisualizerMode] = useState<VisualizerMode>('bars');
   const [isScrubbing, setIsScrubbing] = useState(false);

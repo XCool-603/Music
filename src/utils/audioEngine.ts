@@ -417,16 +417,12 @@ class AudioEngine {
   private currentRawUrl = '';
   private isProxyRetry = false;
   private simulatedPhase = 0;
-  private currentBandsMode: '10' | '15' = '10';
-  private cachedGains: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-  private isBypassed = false;
   private impulseBuffers: { [key: string]: AudioBuffer } = {};
   // Native (iOS AVPlayer) playback routing. When enabled, playback control and
   // position/duration reads go to the native plugin instead of the HTML5
   // element; volume/EQ setters are ignored (they only affect the Web Audio DSP
   // graph, which is unused in native mode).
   private nativeMode = false;
-  private nativeSnapshot = { playing: false, position: 0, duration: 0 };
   // Metadata of the track most recently handed to the native AVPlayer, kept so
   // a native-proxy retry (see retryCurrentTrackViaNativeProxy) can refresh the
   // lock-screen metadata without a round-trip to the caller.
@@ -702,7 +698,6 @@ class AudioEngine {
     );
     if (!ok) return false;
     await nativePlay();
-    this.nativeSnapshot = { playing: true, position: resumePos, duration: this.lastNativeMeta?.duration || 0 };
     console.warn('[AudioEngine] native playback retried via backend proxy');
     return true;
   }
@@ -733,7 +728,6 @@ class AudioEngine {
         duration: metadata?.duration || 0,
       }, resumePos);
       if (ok) {
-        this.nativeSnapshot = { playing: false, position: resumePos, duration: metadata?.duration || 0 };
         return;
       }
       console.warn('[AudioEngine] native playback failed to load, falling back to HTML5');
@@ -834,13 +828,10 @@ class AudioEngine {
 
   // --- Professional EQ & DSP Setters ---
 
-  public setBandsMode(mode: '10' | '15') {
-    this.currentBandsMode = mode;
+  public setBandsMode(_mode: '10' | '15') {
   }
 
   public setEQGains(gains: number[], mode: '10' | '15' = '10') {
-    this.cachedGains = gains;
-    this.currentBandsMode = mode;
     if (!this.audioCtx) return;
 
     const filters = mode === '15' ? this.eq15Filters : this.eq10Filters;
@@ -859,7 +850,6 @@ class AudioEngine {
   }
 
   public setBypass(bypassed: boolean) {
-    this.isBypassed = bypassed;
     if (!this.audioCtx || !this.dryGainNode || !this.wetGainNode) return;
     const now = this.audioCtx.currentTime;
     if (bypassed) {

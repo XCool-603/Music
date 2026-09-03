@@ -15,8 +15,6 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   tracks,
   onPlayTrack,
-  onOpenMobileMenu,
-  onOpenEQ,
   onNavigateToSearch,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');

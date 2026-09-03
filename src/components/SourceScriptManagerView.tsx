@@ -18,14 +18,11 @@ import {
   AlertCircle,
   Trash2,
   Download,
-  ExternalLink,
   Code2,
   Sparkles,
   RefreshCw,
   Eye,
-  Sliders,
   CheckCircle2,
-  Copy,
   Info,
   Layers,
   Search,
@@ -546,7 +543,7 @@ export const SourceScriptManagerView: React.FC<SourceScriptManagerViewProps> = (
               />
             </div>
             <button
-              onClick={handleImportFromUrl}
+              onClick={() => handleImportFromUrl()}
               disabled={isImportingUrl || !urlInput.trim()}
               className="px-3.5 py-1.5 bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white font-semibold text-xs rounded-2xl border border-white/15 transition flex-shrink-0"
             >

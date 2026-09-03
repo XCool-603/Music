@@ -220,7 +220,6 @@ export default function App() {
   }, [customScripts]);
 
   // --- Audio State ---
-  const [nativeDiag, setNativeDiag] = useState<{ engaged: boolean; ticks: number } | null>(null);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   // Continuous playback time lives in timeStore (src/utils/timeStore.ts), NOT in
@@ -328,7 +327,6 @@ export default function App() {
   const audioSettingsRef = useRef(audioSettings);
   useEffect(() => { audioSettingsRef.current = audioSettings; }, [audioSettings]);
   const sleepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastPlaybackSyncRef = useRef(0);
   const nativeInitPromiseRef = useRef<Promise<boolean> | null>(null);
   // One-shot guard: a native playback error first retries through the backend
   // proxy (staying on AVPlayer); only a second error downgrades to HTML5.
@@ -506,7 +504,7 @@ export default function App() {
       await audioEngine.loadTrack(
         finalAudioUrl,
         handleTrackEnded,
-        (err) => console.log('Handling stream fallback with Web Audio...'),
+        () => console.log('Handling stream fallback with Web Audio...'),
         {
           title: resolvedTrack.title,
           artist: resolvedTrack.artist,
@@ -635,12 +633,9 @@ export default function App() {
         console.log('[App] native playback ENGAGED (AVPlayer) — background playback active');
       } else {
         console.warn('[App] native playback unavailable — using HTML5 audio (background may stop)');
-        setNativeDiag({ engaged: false, ticks: 0 });
         return;
       }
-      setNativeDiag({ engaged: true, ticks: 0 });
       const iv = window.setInterval(() => {
-        setNativeDiag((d) => (d && d.engaged ? { engaged: true, ticks: d.ticks + 1 } : d));
         const snap = getNativeSnapshot();
         // Surface a screen-visible marker so runtime backend is obvious without consoles.
         document.title = snap.playing

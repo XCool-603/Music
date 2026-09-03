@@ -1,5 +1,5 @@
 import React from 'react';
-import { Heart, ListMusic, FileCode, Sliders, Upload, Moon, Headphones, User } from 'lucide-react';
+import { Heart, ListMusic, FileCode, Sliders, Upload, Moon, User } from 'lucide-react';
 
 interface MyViewProps {
   favoritesCount: number;

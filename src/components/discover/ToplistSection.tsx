@@ -27,8 +27,6 @@ const TABS: { key: ToplistCategory; label: string; icon: React.ReactNode }[] = [
   { key: 'rise', label: '飙升榜', icon: <Trophy className="w-3.5 h-3.5" /> },
 ];
 
-const RANK_STYLES = ['from-amber-400 to-yellow-600 text-black', 'from-slate-300 to-slate-500 text-black', 'from-orange-400 to-amber-700 text-black'];
-
 /**
  * Official toplist (v2 API): tabs hot/new/rise, gold-silver-bronze top-3 hero
  * cards + ranked rows 4-10. Silently degrades to local curated tracks.

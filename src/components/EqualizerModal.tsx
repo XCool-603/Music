@@ -5,7 +5,6 @@ import {
   BAND_METAS_10,
   BAND_METAS_15,
   EQ_PRESETS,
-  BandMeta,
   audioEngine,
 } from '../utils/audioEngine';
 import { AudioSettings, EQPreset } from '../types';
@@ -17,15 +16,12 @@ import {
   X,
   Activity,
   Mic,
-  Music,
   Headphones,
-  Film,
   Bookmark,
   Plus,
   Trash2,
   Radio,
   ShieldCheck,
-  Disc3,
   Waves,
   ArrowDownUp,
   Cpu,
@@ -288,13 +284,6 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
       const maxLog = Math.log10(maxFreq);
       const logF = Math.log10(Math.max(minFreq, Math.min(maxFreq, f)));
       return ((logF - minLog) / (maxLog - minLog)) * width;
-    };
-
-    const xToFreq = (x: number, width: number) => {
-      const minLog = Math.log10(minFreq);
-      const maxLog = Math.log10(maxFreq);
-      const ratio = Math.max(0, Math.min(1, x / width));
-      return Math.pow(10, minLog + ratio * (maxLog - minLog));
     };
 
     const dbToY = (db: number, height: number) => {

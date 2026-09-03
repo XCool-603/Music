@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Playlist, Track } from '../types';
-import { Plus, X, ListPlus, Music, Check } from 'lucide-react';
+import { X, ListPlus, Check } from 'lucide-react';
 import { ImageWithFallback } from './ImageWithFallback';
 import { normalizeCoverUrl } from '../utils/imageUtils';
 

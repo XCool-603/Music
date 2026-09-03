@@ -11,9 +11,7 @@ import {
   Sliders,
   Moon,
   Plus,
-  Music,
   Sparkles,
-  ListMusic,
   Headphones,
   FileCode,
 } from 'lucide-react';

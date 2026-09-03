@@ -46,7 +46,6 @@ function SourceBadge({ sourceKey }: { sourceKey?: string }) {
 const TrackRowBase: React.FC<TrackRowProps> = ({
   track,
   index,
-  rank,
   variant = 'list-row',
   showSourceBadge = false,
   isCurrent,

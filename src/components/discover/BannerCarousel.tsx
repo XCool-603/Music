@@ -44,7 +44,7 @@ export const BannerCarousel: React.FC<BannerCarouselProps> = ({
   }, [count, paused]);
 
   useEffect(() => {
-    const onVisibility = () => setPaused((p) => (document.hidden ? true : false));
+    const onVisibility = () => setPaused((_p) => (document.hidden ? true : false));
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);

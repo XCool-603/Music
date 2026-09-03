@@ -1,6 +1,6 @@
 import { Track, CustomSourceScript, StreamQuality } from '../types';
 import { SourceScriptRunner } from './sourceScriptEngine';
-import { apiUrl, getApiBase } from './apiBase';
+import { apiUrl } from './apiBase';
 
 export interface DownloadTask {
   id: string;

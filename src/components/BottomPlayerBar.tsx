@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Track, PlaybackMode, VisualizerMode, StreamQuality } from '../types';
+import { Track, PlaybackMode, StreamQuality } from '../types';
 import { formatTime } from '../utils/lyricsParser';
 import { VisualizerCanvas } from './VisualizerCanvas';
 import { ImageWithFallback } from './ImageWithFallback';
 import { normalizeCoverUrl } from '../utils/imageUtils';
+import { useAudioTime } from '../utils/timeStore';
 import confetti from 'canvas-confetti';
 import {
   Play,
@@ -20,9 +21,7 @@ import {
   ListMusic,
   Maximize2,
   Heart,
-  FileText,
   Activity,
-  Gauge,
   Music,
   Download,
 } from 'lucide-react';
@@ -30,7 +29,6 @@ import {
 interface BottomPlayerBarProps {
   track: Track | null;
   isPlaying: boolean;
-  currentTime: number;
   duration: number;
   volume: number;
   isMuted: boolean;
@@ -58,12 +56,10 @@ interface BottomPlayerBarProps {
 export const BottomPlayerBar: React.FC<BottomPlayerBarProps> = ({
   track,
   isPlaying,
-  currentTime,
   duration,
   volume,
   isMuted,
   playbackMode,
-  playbackSpeed,
   quality,
   isFavorite,
   onTogglePlay,
@@ -73,7 +69,6 @@ export const BottomPlayerBar: React.FC<BottomPlayerBarProps> = ({
   onVolumeChange,
   onToggleMute,
   onTogglePlaybackMode,
-  onChangePlaybackSpeed,
   onChangeQuality,
   onToggleFavorite,
   onOpenEQ,
@@ -82,6 +77,9 @@ export const BottomPlayerBar: React.FC<BottomPlayerBarProps> = ({
   onOpenFullScreen,
   onOpenDownload,
 }) => {
+  // Playback time is subscribed via the module-singleton timeStore (capped at
+  // 10fps) instead of a prop, so the whole app tree doesn't re-render per tick.
+  const currentTime = useAudioTime();
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubValue, setScrubValue] = useState(0);
   const [showMiniVisualizer, setShowMiniVisualizer] = useState(false);

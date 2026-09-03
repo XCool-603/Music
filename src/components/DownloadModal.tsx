@@ -20,11 +20,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
-  Disc,
-  Headphones,
   HardDrive,
   Sparkles,
-  ExternalLink,
 } from 'lucide-react';
 
 interface DownloadModalProps {
@@ -42,7 +39,6 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
   track,
   customScripts = [],
   quality = 'high',
-  onOpenLocalImporter,
 }: DownloadModalProps) => {
   const [downloadingType, setDownloadingType] = useState<'audio' | 'lrc' | 'cover' | 'bundle' | null>(null);
   const [progress, setProgress] = useState<number>(0);

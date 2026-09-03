@@ -14,7 +14,6 @@ import {
 
 export const DownloadToastNotification: React.FC = () => {
   const [tasks, setTasks] = useState<DownloadTask[]>([]);
-  const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
     const unsubscribe = subscribeDownloadTasks((updatedTasks) => {
@@ -26,7 +25,6 @@ export const DownloadToastNotification: React.FC = () => {
   if (tasks.length === 0) return null;
 
   const activeTask = tasks.find((t) => t.status === 'downloading');
-  const recentCompleted = tasks.filter((t) => t.status === 'completed');
   const recentErrors = tasks.filter((t) => t.status === 'error');
 
   const latestTask = tasks[0];

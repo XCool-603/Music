@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ListMusic, Music, Sparkles } from 'lucide-react';
-import { Track, Playlist, GenreCategory } from '../types';
+import { Track, Playlist } from '../types';
 import { GENRE_CATEGORIES } from '../data/discoveryData';
 import { BannerCarousel } from './discover/BannerCarousel';
 import { QuickEntry } from './discover/QuickEntry';

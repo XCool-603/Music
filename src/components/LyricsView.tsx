@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Track } from '../types';
 import { parseLRC, getActiveLyricIndex, formatTime } from '../utils/lyricsParser';
-import { Play, Sparkles, Type } from 'lucide-react';
+import { Play, Sparkles } from 'lucide-react';
 
 interface LyricsViewProps {
   track: Track;
