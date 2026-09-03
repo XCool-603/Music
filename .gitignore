@@ -14,8 +14,17 @@ coverage/
 # IDE / workspace
 .idea/
 .vs/
+.vscode/
 *.suo
 *.user
+
+# AI agent workspace
+.agents/
+.trae/
+skills-lock.json
+
+# Local build artifacts
+release/
 
 # Secrets (never commit signing keystores)
 *.jks
