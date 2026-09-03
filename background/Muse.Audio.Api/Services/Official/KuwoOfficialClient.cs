@@ -285,8 +285,8 @@ public class KuwoOfficialClient
                 var v = p.GetInt64();
                 return v > 0 ? v : null;
             }
-            if (p.ValueKind == JsonValueKind.String && long.TryParse(p.GetString(), out var v) && v > 0)
-                return v;
+            if (p.ValueKind == JsonValueKind.String && long.TryParse(p.GetString(), out var payNum) && payNum > 0)
+                return payNum;
         }
         return null;
     }

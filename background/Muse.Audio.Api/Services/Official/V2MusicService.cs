@@ -363,8 +363,8 @@ public class V2MusicService
         {
             Console.WriteLine($"[v2:cross] start neId={neteaseId} q={quality}");
             meta ??= await _netease.GetSongMetaAsync(neteaseId);
-            if (meta is null) { Console.WriteLine("[v2:cross] meta=null"); return null; }
-            var (title, artist) = (meta.Title, meta.Artist);
+            if (meta is not { } m) { Console.WriteLine("[v2:cross] meta=null"); return null; }
+            var (title, artist) = (m.Title, m.Artist);
             Console.WriteLine($"[v2:cross] meta='{title}' / '{artist}'");
 
             var q = string.IsNullOrWhiteSpace(artist) ? title : $"{title} {artist}";
@@ -482,15 +482,15 @@ public class V2MusicService
         else
         {
             var meta = await _netease.GetSongMetaAsync(id);
-            if (meta is null) return null;
+            if (meta is not { } m) return null;
             return new
             {
                 source,
                 id,
-                title = meta.Title,
-                artist = meta.Artist,
-                fee = meta.Fee,
-                vipLocked = meta.Fee == 1,
+                title = m.Title,
+                artist = m.Artist,
+                fee = m.Fee,
+                vipLocked = m.Fee == 1,
             };
         }
     }
