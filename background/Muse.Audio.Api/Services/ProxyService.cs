@@ -75,6 +75,18 @@ public class ProxyService
     {
         try
         {
+            // Relative URLs (e.g. "/api/v2/song/url?...") point at this backend's
+            // own endpoints — resolve them against the incoming request origin so
+            // HttpClient gets an absolute URI. Redirects (302 → CDN) are followed
+            // automatically via AllowAutoRedirect.
+            if (targetUrl.StartsWith('/') && !targetUrl.StartsWith("//"))
+            {
+                var scheme = ctx.Request.Scheme;
+                var host = ctx.Request.Host.Value;
+                if (!string.IsNullOrEmpty(host))
+                    targetUrl = $"{scheme}://{host}{targetUrl}";
+            }
+
             var req = new HttpRequestMessage(HttpMethod.Get, targetUrl);
             var userAgent = ua ?? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
             req.Headers.Add("User-Agent", userAgent);
