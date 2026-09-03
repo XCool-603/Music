@@ -170,30 +170,6 @@ export async function v2HotSearch(source: 'kuwo' | 'netease' = 'netease'): Promi
   return [];
 }
 
-// ── Search suggestions ──────────────────────────────────────────────
-
-export interface SuggestItem {
-  keyword: string;
-  type?: string | null;
-  hint?: string | null;
-}
-
-/** Official suggest. v1 mode returns [] (caller can fall back to v2Search). */
-export async function v2Suggest(
-  q: string,
-  source: 'kuwo' | 'netease' = 'kuwo',
-  limit = 8
-): Promise<SuggestItem[]> {
-  const query = (q || '').trim();
-  if (!query) return [];
-  if (!API_V2) return [];
-  const data = await fetchJson(
-    apiUrl(`/api/v2/search/suggest?q=${encodeURIComponent(query)}&source=${source}&limit=${limit}`)
-  );
-  if (data && Array.isArray(data.suggestions)) return data.suggestions;
-  return [];
-}
-
 // ── Toplist ─────────────────────────────────────────────────────────
 
 export type ToplistCategory = 'hot' | 'new' | 'rise';

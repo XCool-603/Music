@@ -7,14 +7,12 @@ interface SearchBarProps {
   onChange: (value: string) => void;
   onSubmit: (e: React.FormEvent) => void;
   onClear: () => void;
-  onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
 }
 
 /**
- * 搜索输入框。仅负责展示与输入事件；联想下拉由 SuggestDropdown 渲染，
- * 键盘导航事件由容器在 input 上处理。
+ * 搜索输入框。仅负责展示与输入事件。
  */
-export const SearchBar: React.FC<SearchBarProps> = ({ value, inputRef, onChange, onSubmit, onClear, onKeyDown }) => (
+export const SearchBar: React.FC<SearchBarProps> = ({ value, inputRef, onChange, onSubmit, onClear }) => (
   <form onSubmit={onSubmit} className="relative flex items-center mb-4">
     <div className="relative flex-1 flex items-center bg-white/10 border border-white/20 rounded-2xl px-4 py-3.5 backdrop-blur-xl focus-within:border-emerald-400/80 focus-within:ring-2 focus-within:ring-emerald-400/20 transition shadow-inner">
       <Search className="w-5 h-5 text-slate-300 mr-3 flex-shrink-0" />
@@ -23,7 +21,6 @@ export const SearchBar: React.FC<SearchBarProps> = ({ value, inputRef, onChange,
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        onKeyDown={onKeyDown}
         placeholder="搜索歌曲名（如：周杰伦 夜曲、晴天）、歌手、专辑、曲风..."
         className="bg-transparent border-none outline-none text-sm sm:text-base text-white placeholder:text-slate-400 w-full"
         autoComplete="off"

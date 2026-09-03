@@ -2,9 +2,8 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Track, Playlist, CustomSourceScript } from '../types';
 import { searchAggregatedOnlineMusic } from '../utils/sourceScriptEngine';
 import { Search, Sparkles, Music, Headphones, Loader2 } from 'lucide-react';
-import { v2Search, v2Suggest, v2HotSearch, HotKeyword } from '../utils/apiV2';
+import { v2HotSearch, HotKeyword } from '../utils/apiV2';
 import { SearchBar } from './search/SearchBar';
-import { SuggestDropdown } from './search/SuggestDropdown';
 import { SearchHome } from './search/SearchHome';
 import { ResultTabs, SearchFilterTab, ResultTab } from './search/ResultTabs';
 import { ComprehensiveTab } from './search/ComprehensiveTab';
@@ -41,7 +40,6 @@ type MusicPlatform = 'all' | 'kuwo' | 'netease';
 
 const STORAGE_KEY_SEARCH_HISTORY = 'muse_search_history';
 const ONLINE_PAGE_SIZE = 30;
-const SUGGEST_DEBOUNCE_MS = 300;
 
 export const SearchView: React.FC<SearchViewProps> = ({
   tracks,
@@ -59,15 +57,11 @@ export const SearchView: React.FC<SearchViewProps> = ({
   onOpenAddToPlaylistModal,
   onOpenDownload,
 }) => {
-  // ── 核心状态机：inputValue 驱动联想；committedQuery 驱动全文搜索与历史 ──
+  // ── 核心状态机：inputValue 为输入框当前值；committedQuery 驱动全文搜索与历史 ──
   const [inputValue, setInputValue] = useState(initialQuery || '');
   const [committedQuery, setCommittedQuery] = useState(initialQuery || '');
   const [platform, setPlatform] = useState<MusicPlatform>('all');
   const [filterTab, setFilterTab] = useState<SearchFilterTab>('all');
-
-  const [suggestions, setSuggestions] = useState<{ keyword: string }[]>([]);
-  const [suggestOpen, setSuggestOpen] = useState(false);
-  const [suggestActive, setSuggestActive] = useState(-1);
 
   const [hotKeywords, setHotKeywords] = useState<HotKeyword[]>([]);
 
@@ -87,10 +81,8 @@ export const SearchView: React.FC<SearchViewProps> = ({
   });
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const suggestSeqRef = useRef(0);
   const onlineSeqRef = useRef(0);
   const onlinePageRef = useRef(1);
-  const userTypedRef = useRef(false);
 
   // ── 历史记录 ────────────────────────────────────────────────────────
   const saveSearchKeyword = useCallback((keyword: string) => {
@@ -130,13 +122,11 @@ export const SearchView: React.FC<SearchViewProps> = ({
     });
   };
 
-  // ── 提交搜索（Enter / 按钮 / 联想 / 历史 / 热搜统一入口）──────────────
+  // ── 提交搜索（Enter / 按钮 / 历史 / 热搜统一入口）────────────────────
   const commitSearch = useCallback(
     (keyword: string) => {
       const trimmed = (keyword || '').trim();
       setInputValue(trimmed);
-      setSuggestOpen(false);
-      setSuggestActive(-1);
       setFilterTab('all');
       onlinePageRef.current = 1;
       if (trimmed) saveSearchKeyword(trimmed);
@@ -167,46 +157,12 @@ export const SearchView: React.FC<SearchViewProps> = ({
     };
   }, []);
 
-  // ── 联想：300ms 防抖 + 序号防竞态（官方 suggest，空结果降级 v2Search）──
+  // ── 输入被完全清空 → 回到搜索首页 ───────────────────────────────────
   useEffect(() => {
-    const trimmed = inputValue.trim();
-    if (!trimmed) {
-      setSuggestions([]);
-      setSuggestOpen(false);
-      setSuggestActive(-1);
-      // 输入被完全清空 → 回到搜索首页
+    if (!inputValue.trim()) {
       setCommittedQuery((prev) => (prev ? '' : prev));
-      return;
     }
-    // 仅响应用户真实键入；跳过挂载/程序化赋值，避免进页即弹联想
-    if (!userTypedRef.current) return;
-
-    let isMounted = true;
-    const seq = ++suggestSeqRef.current;
-    const timer = window.setTimeout(async () => {
-      try {
-        const src = platform === 'netease' ? 'netease' : 'kuwo';
-        let items = await v2Suggest(trimmed, src, 8);
-        if (items.length === 0) {
-          const fallback = await v2Search(trimmed, 1, 8, platform === 'all' ? 'all' : platform);
-          items = fallback.map((t) => ({ keyword: `${t.title} - ${t.artist}` }));
-        }
-        if (isMounted && seq === suggestSeqRef.current) {
-          setSuggestions(items);
-          setSuggestOpen(items.length > 0);
-          setSuggestActive(-1);
-        }
-      } catch {
-        /* 联想失败静默 */
-      }
-    }, SUGGEST_DEBOUNCE_MS);
-
-    return () => {
-      isMounted = false;
-      window.clearTimeout(timer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inputValue, platform]);
+  }, [inputValue]);
 
   // ── 在线全文搜索（仅提交后触发；v2/v1 由聚合器内部按开关选择）─────────
   useEffect(() => {
@@ -393,27 +349,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
     matchedPlaylists.length +
     matchedLyrics.length;
 
-  // ── 联想键盘导航 ─────────────────────────────────────────────────────
-  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!suggestOpen || suggestions.length === 0) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setSuggestActive((prev) => (prev + 1) % suggestions.length);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setSuggestActive((prev) => (prev <= 0 ? suggestions.length - 1 : prev - 1));
-    } else if (e.key === 'Enter') {
-      if (suggestActive >= 0 && suggestions[suggestActive]) {
-        e.preventDefault();
-        commitSearch(suggestions[suggestActive].keyword);
-      }
-    } else if (e.key === 'Escape') {
-      setSuggestOpen(false);
-    }
-  };
-
   const handleInputChange = (value: string) => {
-    userTypedRef.current = true;
     setInputValue(value);
   };
 
@@ -470,18 +406,8 @@ export const SearchView: React.FC<SearchViewProps> = ({
               onClear={() => {
                 setInputValue('');
                 setCommittedQuery('');
-                setSuggestions([]);
-                setSuggestOpen(false);
                 inputRef.current?.focus();
               }}
-              onKeyDown={handleInputKeyDown}
-            />
-            <SuggestDropdown
-              open={suggestOpen}
-              suggestions={suggestions}
-              query={inputValue}
-              activeIndex={suggestActive}
-              onSelect={commitSearch}
             />
           </div>
 
