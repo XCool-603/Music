@@ -451,10 +451,15 @@ export default function App() {
       let finalAudioUrl = resolvedTrack.audioUrl;
 
       if (resolvedTrack.audioUrl.includes('/api/v2/song/url')) {
-        // v2 official-channel link: quality is encoded in the URL and the
-        // backend 302-redirects straight to the official CDN — no second
-        // resolution, no CORS probe needed (works for AVPlayer/HTML5 alike).
-        finalAudioUrl = applyV2Quality(resolvedTrack.audioUrl, q);
+        // v2 official-channel link: quality is encoded in the URL. Play it
+        // through our own audio proxy instead of feeding the dynamic 302
+        // endpoint to the media element directly: the proxy is same-origin
+        // (no CORS failures), returns ACAO:* for the WebAudio DSP graph, and
+        // passes Range requests straight through — so seeking streams a 206
+        // from the cached CDN URL instead of re-following the 302 chain on
+        // every scrub, which used to error out and reload the track from 0.
+        const v2Url = applyV2Quality(resolvedTrack.audioUrl, q);
+        finalAudioUrl = apiUrl(`/api/proxy/audio?url=${encodeURIComponent(v2Url)}`);
       } else if (resolvedTrack.audioUrl.includes('/api/music/stream')) {
         const src = resolvedTrack.sourceKey || (resolvedTrack.id.startsWith('ne_') ? 'netease' : 'kuwo');
         const rid =

@@ -759,10 +759,25 @@ class AudioEngine {
         this.isProxyRetry = true;
         const proxiedUrl = `${getApiBase()}/api/proxy/audio?url=${encodeURIComponent(this.currentRawUrl)}`;
         if (this.audioElement) {
+          // Remember where playback was so the fallback RESUMES instead of
+          // restarting the track from zero (e.g. a mid-track seek whose Range
+          // request failed on the direct CDN link).
+          const resumeAt = this.audioElement.currentTime || 0;
           // Proxy responses come from our own origin with ACAO:* — clear crossOrigin
           // so the WebAudio MediaElementSource gets real samples, not zeroes.
           this.audioElement.crossOrigin = '';
           this.audioElement.src = proxiedUrl;
+          const resumeSeek = () => {
+            this.audioElement?.removeEventListener('loadedmetadata', resumeSeek);
+            if (resumeAt > 1 && this.audioElement) {
+              try {
+                this.audioElement.currentTime = resumeAt;
+              } catch {
+                /* seek after reload may throw if metadata not ready */
+              }
+            }
+          };
+          this.audioElement.addEventListener('loadedmetadata', resumeSeek);
           this.audioElement.play().catch(() => {});
         }
         return;

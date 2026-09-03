@@ -499,7 +499,12 @@ public class MusicService
             ctx.Response.ContentType = upstream.Content.Headers.ContentType?.MediaType ?? "audio/mpeg";
             ctx.Response.Headers["Accept-Ranges"] = "bytes";
             ctx.Response.Headers["Access-Control-Allow-Origin"] = "*";
-            ctx.Response.Headers["Cache-Control"] = "public, max-age=86400";
+            // Audio streams must NOT be disk-cached: a truncated cached 200
+            // entry mixed with seek-time 206 responses makes Chromium abort
+            // with ERR_CONTENT_LENGTH_MISMATCH and reload the track from 0.
+            // Media elements keep their own in-memory buffer.
+            ctx.Response.Headers["Cache-Control"] = "no-store";
+            ctx.Response.Headers["Vary"] = "Range";
 
             if (upstream.Content.Headers.ContentLength.HasValue)
                 ctx.Response.ContentLength = upstream.Content.Headers.ContentLength;

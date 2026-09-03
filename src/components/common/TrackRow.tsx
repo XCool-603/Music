@@ -107,9 +107,10 @@ const TrackRowBase: React.FC<TrackRowProps> = ({
 
   return (
     <div
-      className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 transition cursor-pointer ${
+      className={`group relative grid grid-cols-[28px_40px_minmax(0,1fr)_auto] sm:grid-cols-[28px_40px_minmax(0,2fr)_minmax(0,1fr)_auto_auto] md:grid-cols-[28px_40px_minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,1fr)_auto_auto] items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition cursor-pointer ${
         isCurrent ? 'bg-indigo-500/15' : 'hover:bg-white/5'
       }`}
+      onDoubleClick={handlePlay}
       onClick={handlePlay}
     >
       {typeof index === 'number' && (
@@ -121,14 +122,14 @@ const TrackRowBase: React.FC<TrackRowProps> = ({
               <span className="w-1 rounded bg-indigo-400 animate-[eqbar_1.1s_ease-in-out_infinite]" style={{ height: '45%' }} />
             </div>
           ) : (
-            <span className={`text-sm font-semibold ${index! < 3 ? 'text-amber-400' : 'text-slate-500'}`}>
+            <span className={`text-xs tabular-nums ${index! < 3 ? 'text-amber-400' : 'text-slate-500'}`}>
               {index! + 1}
             </span>
           )}
         </div>
       )}
 
-      <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg bg-black/30">
+      <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-black/30">
         <ImageWithFallback
           src={normalizeCoverUrl(track.coverUrl)}
           alt={track.title}
@@ -140,9 +141,9 @@ const TrackRowBase: React.FC<TrackRowProps> = ({
           }`}
         >
           {active ? (
-            <Pause className="h-5 w-5 fill-current text-white" />
+            <Pause className="h-4 w-4 fill-current text-white" />
           ) : (
-            <Play className="h-5 w-5 fill-current text-white ml-0.5" />
+            <Play className="h-4 w-4 fill-current text-white ml-0.5" />
           )}
         </div>
       </div>
@@ -154,53 +155,56 @@ const TrackRowBase: React.FC<TrackRowProps> = ({
             {track.title}
           </p>
         </div>
-        <p className="truncate text-xs text-slate-400 mt-0.5">
+        <p className="truncate text-xs text-slate-400 mt-0.5 sm:hidden">
           {track.artist} · {track.album}
         </p>
       </div>
 
-      <span className="hidden sm:block shrink-0 text-xs text-slate-500 tabular-nums">
+      <p className="hidden sm:block min-w-0 truncate text-xs text-slate-400">{track.artist}</p>
+      <p className="hidden md:block min-w-0 truncate text-xs text-slate-500">{track.album}</p>
+
+      <span className="shrink-0 text-xs text-slate-500 tabular-nums">
         {formatTime(track.duration || 0)}
       </span>
 
       <div
-        className="flex items-center gap-0.5 shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+        className="absolute right-2 sm:static flex items-center gap-0.5 shrink-0 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
         onClick={(e) => e.stopPropagation()}
       >
         <button
           onClick={handleFavorite}
           aria-label={isFavorite ? '取消收藏' : '收藏'}
-          className={`flex h-8 w-8 items-center justify-center rounded-full transition hover:bg-white/10 ${
+          className={`flex h-7 w-7 items-center justify-center rounded-full transition hover:bg-white/10 ${
             isFavorite ? 'text-pink-400' : 'text-slate-400 hover:text-pink-300'
           }`}
         >
-          <Heart className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />
+          <Heart className={`h-3.5 w-3.5 ${isFavorite ? 'fill-current' : ''}`} />
         </button>
         {onAddToQueue && (
           <button
             onClick={() => onAddToQueue(track)}
             aria-label="加入队列"
-            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/10 hover:text-white"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/10 hover:text-white"
           >
-            <ListPlus className="h-4 w-4" />
+            <ListPlus className="h-3.5 w-3.5" />
           </button>
         )}
         {onAddToPlaylist && (
           <button
             onClick={() => onAddToPlaylist(track)}
             aria-label="收藏到歌单"
-            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/10 hover:text-white"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/10 hover:text-white"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-3.5 w-3.5" />
           </button>
         )}
         {onDownload && (
           <button
             onClick={() => onDownload(track)}
             aria-label="下载"
-            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/10 hover:text-white"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/10 hover:text-white"
           >
-            <Download className="h-4 w-4" />
+            <Download className="h-3.5 w-3.5" />
           </button>
         )}
       </div>

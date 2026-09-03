@@ -5,7 +5,7 @@ import { BestMatchHero, BestMatch } from './BestMatchHero';
 import { TrackResultList } from './TrackResultList';
 import { ArtistGrid, AlbumGrid, PlaylistGrid, LyricMatchList, MatchedArtist, MatchedAlbum, MatchedLyric } from './SearchResultGroups';
 
-const PREVIEW_COUNT = 10;
+const PREVIEW_COUNT = 20;
 const GROUP_PREVIEW = 4;
 
 interface ComprehensiveTabProps {
