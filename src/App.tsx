@@ -13,7 +13,7 @@ import { audioEngine } from './utils/audioEngine';
 import { setPlaybackState, initNativePlayback, isNativePlayback } from './utils/nativeAudio';
 import { getNativeSnapshot } from './utils/nativeAudio';
 import { apiUrl } from './utils/apiBase';
-import { applyV2Quality, v2Lyric } from './utils/apiV2';
+import { applyV2Quality, v2Lyric, v2Search } from './utils/apiV2';
 import { dismissSplash } from './utils/splash';
 import { timeStore } from './utils/timeStore';
 import {
@@ -441,12 +441,10 @@ export default function App() {
       setRecentHistory((prev) => [resolvedTrack.id, ...prev.filter((id) => id !== resolvedTrack.id)].slice(0, 30));
 
       // Apply user-selected stream quality tier to API-backed audio URLs.
-      // Prefer the direct official/CDN link (single-bandwidth) so playback does
-      // not relay twice through the backend. The WebAudio DSP graph (EQ etc.)
-      // requires the media to be CORS-accessible or it outputs silence, so we
-      // probe the CDN link first: on success play it directly; on CORS/network
-      // failure fall back to the backend proxied stream (which sends ACAO:* and
-      // always produces sound).
+      // All playback routes through our own origin (direct CDN links get
+      // wrapped by audioEngine.normalizeAudioUrl into /api/proxy/audio, which
+      // sends ACAO:* — so the WebAudio DSP graph always receives real samples
+      // and no media request is ever rejected by CORS).
       const q = audioSettingsRef.current.quality || 'high';
       let finalAudioUrl = resolvedTrack.audioUrl;
 
@@ -461,39 +459,34 @@ export default function App() {
         const v2Url = applyV2Quality(resolvedTrack.audioUrl, q);
         finalAudioUrl = apiUrl(`/api/proxy/audio?url=${encodeURIComponent(v2Url)}`);
       } else if (resolvedTrack.audioUrl.includes('/api/music/stream')) {
-        const src = resolvedTrack.sourceKey || (resolvedTrack.id.startsWith('ne_') ? 'netease' : 'kuwo');
-        const rid =
-          resolvedTrack.sourceRawInfo?.id ||
-          resolvedTrack.sourceRawInfo?.songmid ||
-          resolvedTrack.id.replace(/^(kw_|ne_|tx_)/, '');
+        // v1 proxied stream: just rewrite the quality tier.
+        finalAudioUrl =
+          resolvedTrack.audioUrl.replace(/(level=)[^&]*/, `$1${q}`) +
+          (resolvedTrack.audioUrl.includes('level=') ? '' : `&level=${q}`);
+      }
+
+      // Script-sourced rows (aggregator puts them first) can carry an empty
+      // audioUrl when the script's musicUrl resolution failed — feeding ''
+      // to loadTrack is a silent no-op (no request, no error). Fall back to
+      // a live official search by title+artist and play the first hit so the
+      // user always gets sound.
+      if (!finalAudioUrl || !finalAudioUrl.trim()) {
         try {
-          const r = await fetch(
-            apiUrl(`/api/music/stream-url?source=${src}&id=${encodeURIComponent(rid)}&rid=${encodeURIComponent(rid)}&level=${q}`)
-          );
-          if (r.ok) {
-            const data = await r.json();
-            if (data && data.url) {
-              // Probe CORS: HEAD/GET through fetch. If Ok, the CDN exposes
-              // cross-origin audio that MediaElementSource can decode.
-              try {
-                const probe = await fetch(data.url, { method: 'HEAD', mode: 'cors' });
-                if (probe.ok) {
-                  finalAudioUrl = data.url;
-                } else {
-                  console.debug('[Audio] CDN direct blocked (no CORS), using proxied stream:', probe.status);
-                }
-              } catch (probeErr) {
-                console.debug('[Audio] CDN direct unreachable, using proxied stream:', probeErr);
-              }
-            }
+          const fallbackQuery = `${resolvedTrack.title} ${resolvedTrack.artist}`.trim();
+          const hits = await v2Search(fallbackQuery, 1, 1, 'all');
+          const hit = hits.find((t) => t.audioUrl && t.audioUrl.includes('/api/v2/song/url'));
+          if (hit) {
+            const v2Url = applyV2Quality(hit.audioUrl, q);
+            finalAudioUrl = apiUrl(`/api/proxy/audio?url=${encodeURIComponent(v2Url)}`);
+            resolvedTrack = {
+              ...resolvedTrack,
+              audioUrl: v2Url,
+              sourceName: hit.sourceName || resolvedTrack.sourceName,
+              sourceKey: hit.sourceKey || resolvedTrack.sourceKey,
+            };
           }
-        } catch (err) {
-          console.warn('Direct stream-url resolve failed, using proxied stream:', err);
-        }
-        if (finalAudioUrl.includes('/api/music/stream')) {
-          finalAudioUrl =
-            finalAudioUrl.replace(/(level=)[^&]*/, `$1${q}`) +
-            (finalAudioUrl.includes('level=') ? '' : `&level=${q}`);
+        } catch (fallbackErr) {
+          console.warn('[App] official-source fallback search failed:', fallbackErr);
         }
       }
 

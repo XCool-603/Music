@@ -652,11 +652,14 @@ class AudioEngine {
     }
     const isHttp = trimmed.startsWith('http://') || trimmed.startsWith('https://');
 
-    if (isHttp) {
-      // Direct load official CDN (single-bandwidth, no backend relay).
-      // Playback of cross-origin media needs no CORS; on failure the onerror
-      // handler below retries through the backend proxy (/api/proxy/audio).
-      return trimmed;
+    if (isHttp && !trimmed.startsWith(`${getApiBase()}/api/proxy/audio`)) {
+      // Absolute CDN links (Kuwo car-*.kuwo.cn, JS source scripts, etc.) never
+      // carry Access-Control-Allow-Origin, so a crossOrigin='anonymous' media
+      // request is rejected by CORS before the first byte — playback then had
+      // to be rescued by the onerror fallback. Route them through our own
+      // proxy instead: same-origin, ACAO:*, Range passthrough, WebAudio-safe.
+      const base = getApiBase();
+      return `${base}/api/proxy/audio?url=${encodeURIComponent(trimmed)}`;
     }
     return trimmed;
   }
