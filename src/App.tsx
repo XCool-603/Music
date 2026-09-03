@@ -1145,8 +1145,6 @@ export default function App() {
                 path="/search"
                 element={
                   <SearchView
-                    tracks={tracks}
-                    playlists={playlists}
                     scripts={customScripts}
                     currentTrack={currentTrack}
                     isPlaying={isPlaying}
@@ -1156,7 +1154,6 @@ export default function App() {
                     onPlayAll={handlePlayAll}
                     onAddToQueue={handleAddToQueue}
                     onToggleFavorite={handleToggleFavorite}
-                    onSelectPlaylist={goPlaylist}
                     onOpenAddToPlaylistModal={(track) => {
                       setTrackToAddToPlaylist(track);
                       setIsPlaylistModalOpen(true);

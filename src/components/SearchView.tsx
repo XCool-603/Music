@@ -1,27 +1,13 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Track, Playlist, CustomSourceScript } from '../types';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Track, CustomSourceScript } from '../types';
 import { searchAggregatedOnlineMusic } from '../utils/sourceScriptEngine';
-import { Search, Sparkles, Music, Headphones, Loader2 } from 'lucide-react';
+import { Search, Sparkles, Music, Headphones, Loader2, Play, ChevronLeft, ChevronRight } from 'lucide-react';
 import { v2HotSearch, HotKeyword } from '../utils/apiV2';
 import { SearchBar } from './search/SearchBar';
 import { SearchHome } from './search/SearchHome';
-import { ResultTabs, SearchFilterTab, ResultTab } from './search/ResultTabs';
-import { ComprehensiveTab } from './search/ComprehensiveTab';
-import { BestMatch } from './search/BestMatchHero';
 import { TrackResultList } from './search/TrackResultList';
-import {
-  ArtistGrid,
-  AlbumGrid,
-  PlaylistGrid,
-  LyricMatchList,
-  MatchedArtist,
-  MatchedAlbum,
-  MatchedLyric,
-} from './search/SearchResultGroups';
 
 interface SearchViewProps {
-  tracks: Track[];
-  playlists: Playlist[];
   scripts?: CustomSourceScript[];
   currentTrack: Track | null;
   isPlaying: boolean;
@@ -31,7 +17,6 @@ interface SearchViewProps {
   onPlayAll: (tracks: Track[]) => void;
   onAddToQueue: (track: Track) => void;
   onToggleFavorite: (track: Track) => void;
-  onSelectPlaylist: (playlist: Playlist) => void;
   onOpenAddToPlaylistModal: (track: Track) => void;
   onOpenDownload?: (track: Track) => void;
 }
@@ -42,8 +27,6 @@ const STORAGE_KEY_SEARCH_HISTORY = 'muse_search_history';
 const ONLINE_PAGE_SIZE = 30;
 
 export const SearchView: React.FC<SearchViewProps> = ({
-  tracks,
-  playlists,
   scripts = [],
   currentTrack,
   isPlaying,
@@ -53,7 +36,6 @@ export const SearchView: React.FC<SearchViewProps> = ({
   onPlayAll,
   onAddToQueue,
   onToggleFavorite,
-  onSelectPlaylist,
   onOpenAddToPlaylistModal,
   onOpenDownload,
 }) => {
@@ -61,15 +43,13 @@ export const SearchView: React.FC<SearchViewProps> = ({
   const [inputValue, setInputValue] = useState(initialQuery || '');
   const [committedQuery, setCommittedQuery] = useState(initialQuery || '');
   const [platform, setPlatform] = useState<MusicPlatform>('all');
-  const [filterTab, setFilterTab] = useState<SearchFilterTab>('all');
 
   const [hotKeywords, setHotKeywords] = useState<HotKeyword[]>([]);
 
   const [onlineTracks, setOnlineTracks] = useState<Track[]>([]);
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
-  const [onlineHasMore, setOnlineHasMore] = useState(false);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-
+  const [onlinePage, setOnlinePage] = useState(1);
+  const [isPageLoading, setIsPageLoading] = useState(false);
 
   const [history, setHistory] = useState<string[]>(() => {
     try {
@@ -82,7 +62,6 @@ export const SearchView: React.FC<SearchViewProps> = ({
 
   const inputRef = useRef<HTMLInputElement>(null);
   const onlineSeqRef = useRef(0);
-  const onlinePageRef = useRef(1);
 
   // ── 历史记录 ────────────────────────────────────────────────────────
   const saveSearchKeyword = useCallback((keyword: string) => {
@@ -127,8 +106,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
     (keyword: string) => {
       const trimmed = (keyword || '').trim();
       setInputValue(trimmed);
-      setFilterTab('all');
-      onlinePageRef.current = 1;
+      setOnlinePage(1);
       if (trimmed) saveSearchKeyword(trimmed);
       setCommittedQuery(trimmed);
       inputRef.current?.blur();
@@ -164,19 +142,17 @@ export const SearchView: React.FC<SearchViewProps> = ({
     }
   }, [inputValue]);
 
-  // ── 在线全文搜索（仅提交后触发；v2/v1 由聚合器内部按开关选择）─────────
+  // ── 在线搜索：新查询 / 切换音源 → 回到第 1 页 ────────────────────────
   useEffect(() => {
     const q = committedQuery.trim();
     if (!q) {
       setOnlineTracks([]);
-      setOnlineHasMore(false);
       setIsSearchingOnline(false);
       return;
     }
 
     let isMounted = true;
     const seq = ++onlineSeqRef.current;
-    onlinePageRef.current = 1;
     setIsSearchingOnline(true);
 
     (async () => {
@@ -185,7 +161,6 @@ export const SearchView: React.FC<SearchViewProps> = ({
         const results = await searchAggregatedOnlineMusic(q, activeScripts, platform, 1);
         if (isMounted && seq === onlineSeqRef.current) {
           setOnlineTracks(results);
-          setOnlineHasMore(platform !== 'all' && results.length >= ONLINE_PAGE_SIZE);
           setIsSearchingOnline(false);
         }
       } catch (err) {
@@ -202,152 +177,30 @@ export const SearchView: React.FC<SearchViewProps> = ({
     };
   }, [committedQuery, platform, scripts]);
 
-  const handleLoadMore = useCallback(async () => {
-    const q = committedQuery.trim();
-    if (!q || isLoadingMore || platform === 'all') return;
-    const next = onlinePageRef.current + 1;
-    setIsLoadingMore(true);
-    try {
-      const activeScripts = (scripts || []).filter((s) => s.enabled);
-      const results = await searchAggregatedOnlineMusic(q, activeScripts, platform, next);
-      setOnlineTracks((prev) => {
-        const seen = new Set(prev.map((t) => t.id));
-        return [...prev, ...results.filter((t) => !seen.has(t.id))];
-      });
-      onlinePageRef.current = next;
-      setOnlineHasMore(results.length >= ONLINE_PAGE_SIZE);
-    } catch (err) {
-      console.error('Load more error:', err);
-    } finally {
-      setIsLoadingMore(false);
-    }
-  }, [committedQuery, isLoadingMore, platform, scripts]);
+  // ── 翻页：整页替换（非追加），与主流音乐软件一致 ──────────────────────
+  const handleGoPage = useCallback(
+    async (nextPage: number) => {
+      const q = committedQuery.trim();
+      if (!q || nextPage < 1 || isPageLoading || isSearchingOnline) return;
+      if (nextPage > 1 && onlineTracks.length < ONLINE_PAGE_SIZE) return; // 已是末页
 
-  // 注：洛雪 / JS 音源结果已由 searchAggregatedOnlineMusic 合并进 onlineTracks，
-  // 并在单曲列表顶部优先展示（脚本优先 + 后台兜底 + 去重），不再单独发起脚本检索。
-
-  // ── 本机曲库匹配（原 L244-361 逻辑，触发键 committedQuery）────────────
-  const trimmedQuery = committedQuery.trim().toLowerCase();
-
-  const {
-    matchedTracks,
-    matchedArtists,
-    matchedAlbums,
-    matchedPlaylists,
-    matchedLyrics,
-    bestMatch,
-  } = useMemo(() => {
-    if (!trimmedQuery) {
-      return {
-        matchedTracks: [] as Track[],
-        matchedArtists: [] as MatchedArtist[],
-        matchedAlbums: [] as MatchedAlbum[],
-        matchedPlaylists: [] as Playlist[],
-        matchedLyrics: [] as MatchedLyric[],
-        bestMatch: null as BestMatch | null,
-      };
-    }
-
-    const mTracks = tracks.filter(
-      (t) =>
-        t.title.toLowerCase().includes(trimmedQuery) ||
-        t.artist.toLowerCase().includes(trimmedQuery) ||
-        t.album.toLowerCase().includes(trimmedQuery) ||
-        t.genre.toLowerCase().includes(trimmedQuery)
-    );
-
-    const mLyrics: MatchedLyric[] = tracks
-      .map((t) => {
-        if (!t.lyrics) return null;
-        const lines = t.lyrics.split('\n');
-        const matchedLine = lines.find((line) => {
-          const textOnly = line.replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '').trim();
-          return textOnly.toLowerCase().includes(trimmedQuery);
-        });
-        if (matchedLine) {
-          const cleanText = matchedLine.replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '').trim();
-          return { track: t, snippet: cleanText };
+      const seq = ++onlineSeqRef.current;
+      setIsPageLoading(true);
+      try {
+        const activeScripts = (scripts || []).filter((s) => s.enabled);
+        const results = await searchAggregatedOnlineMusic(q, activeScripts, platform, nextPage);
+        if (seq === onlineSeqRef.current) {
+          setOnlineTracks(results);
+          setOnlinePage(nextPage);
         }
-        return null;
-      })
-      .filter((item): item is MatchedLyric => item !== null);
-
-    const artistMap = new Map<string, MatchedArtist>();
-    tracks.forEach((t) => {
-      if (t.artist.toLowerCase().includes(trimmedQuery)) {
-        const existing = artistMap.get(t.artist);
-        if (existing) {
-          existing.tracks.push(t);
-        } else {
-          artistMap.set(t.artist, {
-            name: t.artist,
-            tracks: [t],
-            coverUrl: t.coverUrl,
-            genre: t.genre,
-          });
-        }
+      } catch (err) {
+        console.error('Page navigation error:', err);
+      } finally {
+        if (seq === onlineSeqRef.current) setIsPageLoading(false);
       }
-    });
-    const mArtists = Array.from(artistMap.values());
-
-    const albumMap = new Map<string, MatchedAlbum>();
-    tracks.forEach((t) => {
-      if (t.album.toLowerCase().includes(trimmedQuery)) {
-        const existing = albumMap.get(t.album);
-        if (existing) {
-          existing.tracks.push(t);
-        } else {
-          albumMap.set(t.album, {
-            title: t.album,
-            artist: t.artist,
-            coverUrl: t.coverUrl,
-            year: t.year,
-            tracks: [t],
-          });
-        }
-      }
-    });
-    const mAlbums = Array.from(albumMap.values());
-
-    const mPlaylists = playlists.filter(
-      (p) =>
-        p.name.toLowerCase().includes(trimmedQuery) ||
-        p.description.toLowerCase().includes(trimmedQuery) ||
-        p.tags.some((tag) => tag.toLowerCase().includes(trimmedQuery))
-    );
-
-    let bMatch: BestMatch | null = null;
-    const exactArtist = mArtists.find((a) => a.name.toLowerCase() === trimmedQuery);
-    if (exactArtist) {
-      bMatch = { type: 'artist', data: exactArtist };
-    } else {
-      const exactTrack = mTracks.find((t) => t.title.toLowerCase() === trimmedQuery);
-      if (exactTrack) {
-        bMatch = { type: 'track', data: exactTrack };
-      } else if (mTracks.length > 0) {
-        bMatch = { type: 'track', data: mTracks[0] };
-      } else if (mArtists.length > 0) {
-        bMatch = { type: 'artist', data: mArtists[0] };
-      }
-    }
-
-    return {
-      matchedTracks: mTracks,
-      matchedArtists: mArtists,
-      matchedAlbums: mAlbums,
-      matchedPlaylists: mPlaylists,
-      matchedLyrics: mLyrics,
-      bestMatch: bMatch,
-    };
-  }, [tracks, playlists, trimmedQuery]);
-
-  const totalResultsCount =
-    onlineTracks.length +
-    matchedTracks.length +
-    matchedArtists.length +
-    matchedAlbums.length +
-    matchedPlaylists.length +
-    matchedLyrics.length;
+    },
+    [committedQuery, isPageLoading, isSearchingOnline, onlineTracks.length, platform, scripts]
+  );
 
   const handleInputChange = (value: string) => {
     setInputValue(value);
@@ -359,30 +212,11 @@ export const SearchView: React.FC<SearchViewProps> = ({
     commitSearch(safeQuery);
   };
 
-  // ── Tabs ─────────────────────────────────────────────────────────────
-  const tabs: ResultTab[] = [
-    { id: 'all', label: '综合', count: totalResultsCount },
-    { id: 'songs', label: '单曲', count: onlineTracks.length + matchedTracks.length },
-    { id: 'playlists', label: '歌单', count: matchedPlaylists.length },
-    { id: 'artists', label: '歌手', count: matchedArtists.length },
-    { id: 'albums', label: '专辑', count: matchedAlbums.length },
-    { id: 'lyrics', label: '歌词', count: matchedLyrics.length },
-  ];
-
-  // 共享的 TrackRow 回调
-  const trackRowHandlers = {
-    currentTrack,
-    isPlaying,
-    favorites,
-    onPlayTrack,
-    onToggleFavorite,
-    onAddToQueue,
-    onAddToPlaylist: onOpenAddToPlaylistModal,
-    onDownload: onOpenDownload,
-  };
+  const isLastPage = onlineTracks.length < ONLINE_PAGE_SIZE;
+  const hasQuery = !!committedQuery.trim();
 
   return (
-    <div className="space-y-8 pb-16 max-w-6xl mx-auto animate-in fade-in duration-300">
+    <div className="space-y-6 pb-16 max-w-6xl mx-auto animate-in fade-in duration-300">
       {/* 顶部搜索区 */}
       <div className="relative rounded-3xl overflow-hidden bg-white/5 border border-white/10 p-6 sm:p-8 shadow-2xl">
         <div className="absolute top-[-40%] right-[-10%] w-72 h-72 bg-emerald-500/15 rounded-full blur-[100px] pointer-events-none -z-0" />
@@ -457,7 +291,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
       </div>
 
       {/* 无查询 → 搜索首页（历史 / 热搜 / 曲风） */}
-      {!committedQuery.trim() ? (
+      {!hasQuery ? (
         <SearchHome
           hotKeywords={hotKeywords}
           history={history}
@@ -466,17 +300,17 @@ export const SearchView: React.FC<SearchViewProps> = ({
           onRemoveHistoryItem={handleRemoveHistoryItem}
         />
       ) : (
-        <div className="space-y-6">
-          <ResultTabs
-            tabs={tabs}
-            active={filterTab}
-            total={totalResultsCount}
-            query={committedQuery}
-            onChange={setFilterTab}
-          />
+        <div className="space-y-4">
+          {/* 搜索中 */}
+          {isSearchingOnline && onlineTracks.length === 0 && (
+            <div className="flex items-center justify-center gap-2 py-12 text-sm text-slate-400">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>正在搜索 “{committedQuery}” ...</span>
+            </div>
+          )}
 
-          {/* 空结果状态 */}
-          {totalResultsCount === 0 && !isSearchingOnline ? (
+          {/* 空结果 */}
+          {!isSearchingOnline && onlineTracks.length === 0 && (
             <div className="bg-white/5 rounded-3xl p-12 text-center border border-white/10 shadow-2xl space-y-4">
               <div className="w-16 h-16 rounded-2xl bg-white/10 border border-white/15 text-slate-400 flex items-center justify-center mx-auto shadow-inner">
                 <Search className="w-8 h-8" />
@@ -497,100 +331,64 @@ export const SearchView: React.FC<SearchViewProps> = ({
                 </button>
               </div>
             </div>
-          ) : (
+          )}
+
+          {/* 在线单曲列表 + 分页 */}
+          {onlineTracks.length > 0 && (
             <>
-              {/* 搜索中（无任何结果时） */}
-              {isSearchingOnline && totalResultsCount === 0 && (
-                <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-400">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>正在搜索 “{committedQuery}” ...</span>
-                </div>
-              )}
+              <TrackResultList
+                tracks={onlineTracks}
+                title={`单曲结果 ${onlineTracks.length < ONLINE_PAGE_SIZE ? onlineTracks.length : `${(onlinePage - 1) * ONLINE_PAGE_SIZE + 1}-${onlinePage * ONLINE_PAGE_SIZE}`}`}
+                titleIcon={<Music className="w-4 h-4 text-emerald-400" />}
+                showSourceBadge
+                currentTrack={currentTrack}
+                isPlaying={isPlaying}
+                favorites={favorites}
+                onPlayTrack={onPlayTrack}
+                onToggleFavorite={onToggleFavorite}
+                onAddToQueue={onAddToQueue}
+                onAddToPlaylist={onOpenAddToPlaylistModal}
+                onDownload={onOpenDownload}
+                startIndex={(onlinePage - 1) * ONLINE_PAGE_SIZE}
+                action={
+                  <button
+                    onClick={() => onPlayAll(onlineTracks)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-xs font-semibold border border-emerald-500/25 transition"
+                  >
+                    <Play className="w-3 h-3 fill-current" />
+                    <span>播放本页</span>
+                  </button>
+                }
+              />
 
-              {/* 综合 */}
-              {(filterTab === 'all' && (totalResultsCount > 0 || isSearchingOnline)) && (
-                <ComprehensiveTab
-                  bestMatch={bestMatch}
-                  onlineTracks={onlineTracks}
-                  localTracks={matchedTracks}
-                  matchedArtists={matchedArtists}
-                  matchedAlbums={matchedAlbums}
-                  matchedPlaylists={matchedPlaylists}
-                  matchedLyrics={matchedLyrics}
-                  {...trackRowHandlers}
-                  onPlayAll={onPlayAll}
-                  onSelectPlaylist={onSelectPlaylist}
-                  onShowMoreSongs={() => setFilterTab('songs')}
-                />
-              )}
+              {/* 分页控件 */}
+              <div className="flex items-center justify-center gap-3 pt-2">
+                <button
+                  onClick={() => handleGoPage(onlinePage - 1)}
+                  disabled={onlinePage <= 1 || isPageLoading}
+                  className="flex items-center gap-1 px-4 py-2 rounded-full bg-white/10 hover:bg-white/15 disabled:opacity-40 disabled:hover:bg-white/10 text-white text-xs font-semibold border border-white/15 transition"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>上一页</span>
+                </button>
 
-              {/* 单曲 */}
-              {filterTab === 'songs' && (
-                <div className="space-y-6">
-                  {isSearchingOnline && onlineTracks.length === 0 && (
-                    <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-400">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>正在搜索 “{committedQuery}” ...</span>
-                    </div>
+                <span className="text-xs text-slate-400 tabular-nums min-w-16 text-center">
+                  {isPageLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin inline" />
+                  ) : (
+                    <>第 {onlinePage} 页{isLastPage ? ' · 末页' : ''}</>
                   )}
-                  <TrackResultList
-                    tracks={onlineTracks}
-                    title={`在线单曲 (${onlineTracks.length})`}
-                    titleIcon={<Music className="w-4 h-4 text-emerald-400" />}
-                    showSourceBadge
-                    {...trackRowHandlers}
-                  />
-                  {onlineHasMore && (
-                    <div className="flex justify-center">
-                      <button
-                        onClick={handleLoadMore}
-                        disabled={isLoadingMore}
-                        className="px-6 py-2.5 bg-white/10 hover:bg-white/15 disabled:opacity-50 text-white text-xs font-semibold rounded-full border border-white/15 transition flex items-center gap-2"
-                      >
-                        {isLoadingMore ? (
-                          <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>加载中...</span>
-                          </>
-                        ) : (
-                          <span>加载更多</span>
-                        )}
-                      </button>
-                    </div>
-                  )}
-                  {platform === 'all' && onlineTracks.length >= ONLINE_PAGE_SIZE && (
-                    <div className="text-center text-xs text-slate-500">
-                      聚合模式跨页可能重复，切换到酷我 / 网易云可查看更多
-                    </div>
-                  )}
-                  <TrackResultList
-                    tracks={matchedTracks}
-                    title={`本机曲库匹配 (${matchedTracks.length})`}
-                    titleIcon={<Music className="w-4 h-4 text-indigo-400" />}
-                    {...trackRowHandlers}
-                  />
-                </div>
-              )}
+                </span>
 
-              {/* 歌手 */}
-              {filterTab === 'artists' && (
-                <ArtistGrid artists={matchedArtists} onPlayAll={onPlayAll} />
-              )}
-
-              {/* 专辑 */}
-              {filterTab === 'albums' && (
-                <AlbumGrid albums={matchedAlbums} onPlayAll={onPlayAll} />
-              )}
-
-              {/* 歌单 */}
-              {filterTab === 'playlists' && (
-                <PlaylistGrid playlists={matchedPlaylists} onSelectPlaylist={onSelectPlaylist} />
-              )}
-
-              {/* 歌词 */}
-              {filterTab === 'lyrics' && (
-                <LyricMatchList items={matchedLyrics} onPlayTrack={onPlayTrack} />
-              )}
+                <button
+                  onClick={() => handleGoPage(onlinePage + 1)}
+                  disabled={isLastPage || isPageLoading}
+                  className="flex items-center gap-1 px-4 py-2 rounded-full bg-white/10 hover:bg-white/15 disabled:opacity-40 disabled:hover:bg-white/10 text-white text-xs font-semibold border border-white/15 transition"
+                >
+                  <span>下一页</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </>
           )}
         </div>
