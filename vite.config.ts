@@ -30,7 +30,9 @@ export default defineConfig(({ command }) => {
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       proxy: {
         '/api': {
-          target: 'http://dxcool.cn:3001',
+          // Local dev proxies to the local backend; override with API_PROXY_TARGET
+          // (e.g. http://dxcool.cn:3001) to point at a remote deployment.
+          target: process.env.API_PROXY_TARGET || 'http://localhost:3001',
           changeOrigin: true,
           timeout: 30000,
           configure: (proxy) => {

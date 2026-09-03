@@ -624,7 +624,7 @@ internal static class KuwoSigner
         while (n.Length > 10)
         {
             var head = long.Parse(n[..10]);
-            var tail = long.Parse(n[10..]);
+            var tail = ParseJsIntLossy(n[10..]);
             n = (head + tail).ToString();
         }
 
@@ -639,6 +639,23 @@ internal static class KuwoSigner
         var dHex = d.ToString("x");
         while (dHex.Length < 8) dHex = "0" + dHex;
         return sb.ToString() + dHex;
+    }
+
+    /// <summary>
+    /// JS parseInt never throws on huge digit strings — it parses into a double
+    /// and silently loses precision. long.Parse would instead throw
+    /// OverflowException for inputs longer than Int64 range (long cookie keys),
+    /// crashing the whole request chain. Emulate the JS behavior: keep leading
+    /// digits, and when they exceed Int64 range approximate by truncating.
+    /// </summary>
+    private static long ParseJsIntLossy(string s)
+    {
+        int i = 0;
+        while (i < s.Length && char.IsDigit(s[i])) i++;
+        if (i == 0) return 0;
+        var digits = s[..i];
+        if (digits.Length > 18) digits = digits[..18];
+        return long.Parse(digits);
     }
 }
 
