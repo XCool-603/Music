@@ -8,9 +8,32 @@ import com.dxcool.museaudio.keepawake.PlaybackService
 class MainActivity : TauriActivity() {
   private var appWebView: WebView? = null
 
+  companion object {
+    private var instance: MainActivity? = null
+
+    fun sendMediaAction(action: String) {
+      instance?.let { act ->
+        act.runOnUiThread {
+          act.appWebView?.evaluateJavascript(
+            "window.dispatchEvent(new CustomEvent('nativeMediaAction', { detail: '$action' }));",
+            null
+          )
+        }
+      }
+    }
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
+    instance = this
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+  }
+
+  override fun onDestroy() {
+    if (instance === this) {
+      instance = null
+    }
+    super.onDestroy()
   }
 
   override fun onWebViewCreate(webView: WebView) {

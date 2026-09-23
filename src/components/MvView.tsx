@@ -187,3 +187,5 @@ export const MvView: React.FC<MvViewProps> = ({ initialQuery = '' }) => {
     </div>
   );
 };
+
+export default MvView;

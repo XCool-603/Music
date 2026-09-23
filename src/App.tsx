@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
 import { useLocation, useNavigate, useParams, Routes, Route, Navigate } from 'react-router-dom';
 import {
   Track,
@@ -21,28 +21,33 @@ import {
   SourceScriptRunner,
   DEFAULT_OPEN_SOURCE_SCRIPT,
   DEFAULT_LOFI_SOURCE_SCRIPT,
+  fetchPublicLrc,
 } from './utils/sourceScriptEngine';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { DiscoverView } from './components/DiscoverView';
 import { SearchView } from './components/SearchView';
-import { MvView } from './components/MvView';
-import { MvPlayer } from './components/MvPlayer';
-import { PlaylistDetailView } from './components/PlaylistDetailView';
 import { LibraryView } from './components/LibraryView';
 import { LocalFileImporter } from './components/LocalFileImporter';
-import { SourceScriptManagerView } from './components/SourceScriptManagerView';
 import { BottomPlayerBar } from './components/BottomPlayerBar';
 import { FullScreenPlayer } from './components/FullScreenPlayer';
-import { EqualizerModal } from './components/EqualizerModal';
 import { QueueDrawer } from './components/QueueDrawer';
 import { SleepTimerModal } from './components/SleepTimerModal';
 import { PlaylistModal } from './components/PlaylistModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { MyView } from './components/MyView';
-import { DownloadModal } from './components/DownloadModal';
 import { DownloadToastNotification } from './components/DownloadToastNotification';
 import { downloadBatchTracks } from './utils/downloadManager';
+import type { PlaylistDetailViewProps } from './components/PlaylistDetailView';
+
+// Code-splitting via React.lazy for non-initial heavy views and modals
+const PlaylistDetailView = lazy(() => import('./components/PlaylistDetailView'));
+const MvView = lazy(() => import('./components/MvView'));
+const MvPlayer = lazy(() => import('./components/MvPlayer'));
+const SourceScriptManagerView = lazy(() => import('./components/SourceScriptManagerView'));
+const EqualizerModal = lazy(() => import('./components/EqualizerModal'));
+const DownloadModal = lazy(() => import('./components/DownloadModal'));
+const ImportPlaylistModal = lazy(() => import('./components/ImportPlaylistModal'));
 
 const TAB_TO_PATH: Record<string, string> = {
   discover: '/',
@@ -69,7 +74,7 @@ const PATH_TO_TAB: Record<string, string> = {
 };
 
 function PlaylistDetailRoute(
-  props: Omit<React.ComponentProps<typeof PlaylistDetailView>, 'playlist'> & { playlists: Playlist[] }
+  props: Omit<PlaylistDetailViewProps, 'playlist'> & { playlists: Playlist[] }
 ) {
   const { playlists, ...viewProps } = props;
   const navigate = useNavigate();
@@ -355,6 +360,22 @@ export default function App() {
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
   const [trackToDownload, setTrackToDownload] = useState<Track | null>(null);
   const [mvToPlay, setMvToPlay] = useState<{ id: string; title: string; artist?: string } | null>(null);
+  const [isImportPlaylistOpen, setIsImportPlaylistOpen] = useState(false);
+
+  const handleImportPlaylistSuccess = useCallback((newPlaylist: Playlist, importedTracks: Track[]) => {
+    setTracks((prev) => {
+      const existingIds = new Set(prev.map((t) => t.id));
+      const fresh = importedTracks.filter((t) => !existingIds.has(t.id));
+      return [...fresh, ...prev];
+    });
+    setPlaylists((prev) => {
+      const updated = [newPlaylist, ...prev];
+      const customList = updated.filter((p) => p.isCustom);
+      localStorage.setItem('wavesound_custom_playlists', JSON.stringify(customList));
+      return updated;
+    });
+    navigate(`/playlist/${encodeURIComponent(newPlaylist.id)}`);
+  }, [navigate]);
 
   const handleOpenDownload = useCallback((track: Track) => {
     setTrackToDownload(track);
@@ -439,6 +460,11 @@ export default function App() {
   // Load and play track
   const handlePlayTrack = useCallback(
     async (track: Track) => {
+      // Smooth fade-out before loading the new track
+      if (isPlaying) {
+        await audioEngine.fadeOut(150);
+      }
+
       let resolvedTrack = track;
 
       // 1. If track is specifically bound to a custom user script —
@@ -525,22 +551,42 @@ export default function App() {
       );
       audioEngine.play();
       setIsPlaying(true);
+      audioEngine.fadeIn(volume, 150);
 
       // 2. Fetch real LRC lyrics in the BACKGROUND — don't block playback.
       //    The user hears audio immediately while lyrics load asynchronously.
       if (
-        resolvedTrack.sourceRawInfo?.id &&
-        (!resolvedTrack.lyrics || resolvedTrack.lyrics.includes('正在同步声学动态频谱') || resolvedTrack.lyrics.length < 50)
+        !resolvedTrack.lyrics ||
+        resolvedTrack.lyrics.includes('正在同步声学动态频谱') ||
+        resolvedTrack.lyrics.length < 50
       ) {
         (async () => {
           try {
-            const songId = resolvedTrack.sourceRawInfo.id;
-            const lrcData = await v2Lyric(resolvedTrack.sourceKey || 'kw', songId);
-            if (lrcData.lrc) {
-              let fullLyrics = lrcData.lrc;
-              if (lrcData.translation) {
-                fullLyrics = lrcData.lrc + '\n---tlyric---\n' + lrcData.translation;
+            let fullLyrics = '';
+            if (resolvedTrack.sourceRawInfo?.id) {
+              try {
+                const songId = resolvedTrack.sourceRawInfo.id;
+                const lrcData = await v2Lyric(resolvedTrack.sourceKey || 'kw', songId);
+                if (lrcData.lrc) {
+                  fullLyrics = lrcData.lrc;
+                  if (lrcData.translation) {
+                    fullLyrics = lrcData.lrc + '\n---tlyric---\n' + lrcData.translation;
+                  }
+                }
+              } catch {
+                /* fallback to public lrc below */
               }
+            }
+
+            // Public mirrored LRC search (NetEase mirror / Kugou) when backend lyrics unavailable
+            if (!fullLyrics) {
+              const publicLrc = await fetchPublicLrc(resolvedTrack.title, resolvedTrack.artist);
+              if (publicLrc) {
+                fullLyrics = publicLrc;
+              }
+            }
+
+            if (fullLyrics) {
               // Only update if this track is still the current one.
               setCurrentTrack((prev) =>
                 prev && prev.id === resolvedTrack.id ? { ...prev, lyrics: fullLyrics } : prev
@@ -552,7 +598,7 @@ export default function App() {
         })();
       }
     },
-    [handleTrackEnded, playbackSpeed, customScripts, audioSettings.quality]
+    [handleTrackEnded, playbackSpeed, customScripts, audioSettings.quality, isPlaying, volume]
   );
 
   // Keep the latest handlePlayTrack accessible to the stable onended callback.
@@ -724,6 +770,25 @@ export default function App() {
     if (!('mediaSession' in navigator)) return;
     navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
   }, [isPlaying]);
+
+  // Android Native Notification Media Controls Listener (ACTION_PLAY_PAUSE, ACTION_NEXT, ACTION_PREV)
+  useEffect(() => {
+    const handleNativeMediaAction = (e: Event) => {
+      const customEvent = e as CustomEvent<string>;
+      const action = customEvent.detail;
+      if (action === 'play_pause') {
+        handleTogglePlayRef.current();
+      } else if (action === 'next') {
+        handleNextRef.current();
+      } else if (action === 'prev') {
+        handlePrevRef.current();
+      }
+    };
+    window.addEventListener('nativeMediaAction', handleNativeMediaAction);
+    return () => {
+      window.removeEventListener('nativeMediaAction', handleNativeMediaAction);
+    };
+  }, []);
 
   // Navigation back-stack tracking (for the edge-swipe back gesture).
   const locationRef = useRef(location);
@@ -1115,6 +1180,7 @@ export default function App() {
               setTrackToAddToPlaylist(null);
               setIsPlaylistModalOpen(true);
             }}
+            onOpenImportPlaylist={() => setIsImportPlaylistOpen(true)}
             onOpenEQ={() => setIsEQModalOpen(true)}
             onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
             favoritesCount={favorites.length}
@@ -1139,6 +1205,7 @@ export default function App() {
 
           {/* Dynamic Viewport Scroller */}
           <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 scrollbar-thin">
+            <Suspense fallback={<div className="p-8 text-sm text-slate-400 flex items-center justify-center">加载中...</div>}>
             <Routes>
               <Route
                 path="/"
@@ -1306,12 +1373,14 @@ export default function App() {
                     onOpenEQ={() => setIsEQModalOpen(true)}
                     onNavigateLocalImport={() => navigate('/local')}
                     onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
+                    onOpenImportPlaylist={() => setIsImportPlaylistOpen(true)}
                   />
                 }
               />
 
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            </Suspense>
           </main>
 
               {/* Bottom Sticky Player Bar (Desktop/Tablet/Mobile) — hidden while full-screen player is open */}
@@ -1391,12 +1460,16 @@ export default function App() {
       />
 
       {/* 10-Band EQ Modal */}
-      <EqualizerModal
-        isOpen={isEQModalOpen}
-        onClose={() => setIsEQModalOpen(false)}
-        audioSettings={audioSettings}
-        setAudioSettings={setAudioSettings}
-      />
+      <Suspense fallback={null}>
+        {isEQModalOpen && (
+          <EqualizerModal
+            isOpen={isEQModalOpen}
+            onClose={() => setIsEQModalOpen(false)}
+            audioSettings={audioSettings}
+            setAudioSettings={setAudioSettings}
+          />
+        )}
+      </Suspense>
 
       {/* Queue Drawer */}
       <QueueDrawer
@@ -1432,26 +1505,45 @@ export default function App() {
       />
 
       {/* High-Quality Download Modal */}
-      <DownloadModal
-        isOpen={isDownloadModalOpen}
-        onClose={() => {
-          setIsDownloadModalOpen(false);
-          setTrackToDownload(null);
-        }}
-        track={trackToDownload || currentTrack}
-        customScripts={customScripts}
-        quality={audioSettings.quality}
-        onOpenLocalImporter={() => navigate('/local')}
-      />
+      <Suspense fallback={null}>
+        {isDownloadModalOpen && (
+          <DownloadModal
+            isOpen={isDownloadModalOpen}
+            onClose={() => {
+              setIsDownloadModalOpen(false);
+              setTrackToDownload(null);
+            }}
+            track={trackToDownload || currentTrack}
+            customScripts={customScripts}
+            quality={audioSettings.quality}
+            onOpenLocalImporter={() => navigate('/local')}
+          />
+        )}
+      </Suspense>
 
       {/* MV Player (global overlay for song-associated MV) */}
-      <MvPlayer
-        isOpen={Boolean(mvToPlay)}
-        onClose={() => setMvToPlay(null)}
-        mvId={mvToPlay?.id || ''}
-        title={mvToPlay?.title || ''}
-        artist={mvToPlay?.artist}
-      />
+      <Suspense fallback={null}>
+        {Boolean(mvToPlay) && (
+          <MvPlayer
+            isOpen={Boolean(mvToPlay)}
+            onClose={() => setMvToPlay(null)}
+            mvId={mvToPlay?.id || ''}
+            title={mvToPlay?.title || ''}
+            artist={mvToPlay?.artist}
+          />
+        )}
+      </Suspense>
+
+      {/* External Playlist Import Modal */}
+      <Suspense fallback={null}>
+        {isImportPlaylistOpen && (
+          <ImportPlaylistModal
+            isOpen={isImportPlaylistOpen}
+            onClose={() => setIsImportPlaylistOpen(false)}
+            onImportSuccess={handleImportPlaylistSuccess}
+          />
+        )}
+      </Suspense>
 
       {/* Floating Download Toast / Queue Notification */}
       <DownloadToastNotification />

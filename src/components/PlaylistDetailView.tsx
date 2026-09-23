@@ -16,7 +16,7 @@ import {
   Download,
 } from 'lucide-react';
 
-interface PlaylistDetailViewProps {
+export interface PlaylistDetailViewProps {
   playlist: Playlist;
   allTracks: Track[];
   currentTrack: Track | null;
@@ -278,3 +278,5 @@ export const PlaylistDetailView: React.FC<PlaylistDetailViewProps> = ({
     </div>
   );
 };
+
+export default PlaylistDetailView;

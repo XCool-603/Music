@@ -20,8 +20,13 @@ class PlaybackService : Service() {
     private const val CHANNEL_ID = "muse_playback"
     private const val CHANNEL_NAME = "后台播放"
     private const val NOTIFICATION_ID = 1001
+    const val ACTION_PREV = "com.dxcool.museaudio.ACTION_PREV"
+    const val ACTION_PLAY_PAUSE = "com.dxcool.museaudio.ACTION_PLAY_PAUSE"
+    const val ACTION_NEXT = "com.dxcool.museaudio.ACTION_NEXT"
     private var wakeLock: PowerManager.WakeLock? = null
     private var running = false
+    private var lastTitle: String = "MUSE.AUDIO"
+    private var lastArtist: String = ""
 
     fun isRunning(): Boolean = running
 
@@ -57,9 +62,18 @@ class PlaybackService : Service() {
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    val title = intent?.getStringExtra("title") ?: "MUSE.AUDIO"
-    val artist = intent?.getStringExtra("artist") ?: ""
-    showNotification(title, artist)
+    when (intent?.action) {
+      ACTION_PREV -> com.dxcool.museaudio.MainActivity.sendMediaAction("prev")
+      ACTION_PLAY_PAUSE -> com.dxcool.museaudio.MainActivity.sendMediaAction("playPause")
+      ACTION_NEXT -> com.dxcool.museaudio.MainActivity.sendMediaAction("next")
+    }
+    if (intent?.hasExtra("title") == true) {
+      lastTitle = intent.getStringExtra("title") ?: "MUSE.AUDIO"
+    }
+    if (intent?.hasExtra("artist") == true) {
+      lastArtist = intent.getStringExtra("artist") ?: ""
+    }
+    showNotification(lastTitle, lastArtist)
     return START_STICKY
   }
 
@@ -72,20 +86,33 @@ class PlaybackService : Service() {
     val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
       flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
     }
+    val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+    } else {
+      android.app.PendingIntent.FLAG_UPDATE_CURRENT
+    }
     val pendingIntent = if (launchIntent != null) {
-      android.app.PendingIntent.getActivity(
-        this,
-        0,
-        launchIntent,
-        android.app.PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) android.app.PendingIntent.FLAG_IMMUTABLE else 0)
-      )
+      android.app.PendingIntent.getActivity(this, 0, launchIntent, pendingIntentFlags)
     } else null
+
+    val prevIntent = android.app.PendingIntent.getService(
+      this, 1, Intent(this, PlaybackService::class.java).apply { action = ACTION_PREV }, pendingIntentFlags
+    )
+    val playPauseIntent = android.app.PendingIntent.getService(
+      this, 2, Intent(this, PlaybackService::class.java).apply { action = ACTION_PLAY_PAUSE }, pendingIntentFlags
+    )
+    val nextIntent = android.app.PendingIntent.getService(
+      this, 3, Intent(this, PlaybackService::class.java).apply { action = ACTION_NEXT }, pendingIntentFlags
+    )
 
     val notification = NotificationCompat.Builder(this, CHANNEL_ID)
       .setSmallIcon(android.R.drawable.ic_media_play)
       .setContentTitle(title)
       .setContentText(artist)
       .setContentIntent(pendingIntent)
+      .addAction(android.R.drawable.ic_media_previous, "上一首", prevIntent)
+      .addAction(android.R.drawable.ic_media_play, "播放/暂停", playPauseIntent)
+      .addAction(android.R.drawable.ic_media_next, "下一首", nextIntent)
       .setOngoing(true)
       .setShowWhen(false)
       .setPriority(NotificationCompat.PRIORITY_LOW)

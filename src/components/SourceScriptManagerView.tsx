@@ -1115,3 +1115,5 @@ export const SourceScriptManagerView: React.FC<SourceScriptManagerViewProps> = (
     </div>
   );
 };
+
+export default SourceScriptManagerView;

@@ -1215,3 +1215,54 @@ async function fetchKuwoSearchData(query: string, page: number): Promise<any> {
 
   return null;
 }
+
+/**
+ * 公共开放歌词检索（免后台、零 CORS 限制，返回真实同步 LRC 歌词）
+ */
+export async function fetchPublicLrc(title: string, artist?: string): Promise<string> {
+  const cleanTitle = (title || '')
+    .replace(/\(.*?\)|（.*?）|\[.*?\]|【.*?】/g, '')
+    .trim();
+  const cleanArtist = (artist || '')
+    .replace(/\(.*?\)|（.*?）|\[.*?\]|【.*?】/g, '')
+    .trim();
+  const query = `${cleanTitle} ${cleanArtist}`.trim() || cleanTitle;
+  if (!query) return '';
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
+
+  try {
+    // 1. 通过支持 CORS 的开放音乐元数据 API 检索歌曲
+    const searchUrl = `https://music-api.gdstudio.xyz/api.php?types=search&count=5&source=netease&pages=1&name=${encodeURIComponent(query)}`;
+    const sRes = await fetch(searchUrl, { signal: ctrl.signal });
+    if (!sRes.ok) return '';
+    const items = await sRes.json();
+    if (!Array.isArray(items) || items.length === 0) return '';
+
+    // 取首个最匹配项
+    const best = items[0];
+    const songId = best.lyric_id || best.id;
+    if (!songId) return '';
+
+    // 2. 获取 LRC 歌词与译文
+    const lrcUrl = `https://music-api.gdstudio.xyz/api.php?types=lyric&id=${songId}&source=netease`;
+    const lRes = await fetch(lrcUrl, { signal: ctrl.signal });
+    if (!lRes.ok) return '';
+    const lrcData = await lRes.json();
+
+    if (lrcData && typeof lrcData.lyric === 'string' && lrcData.lyric.trim()) {
+      let full = lrcData.lyric.trim();
+      if (typeof lrcData.tlyric === 'string' && lrcData.tlyric.trim()) {
+        full += '\n---tlyric---\n' + lrcData.tlyric.trim();
+      }
+      return full;
+    }
+  } catch (err) {
+    console.warn('[PublicLrc] fetch failed:', err);
+  } finally {
+    clearTimeout(timer);
+  }
+  return '';
+}
+

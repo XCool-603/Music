@@ -15,6 +15,7 @@ import {
   Headphones,
   FileCode,
   Clapperboard,
+  Download,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -24,6 +25,7 @@ interface SidebarProps {
   selectedPlaylistId: string | null;
   onSelectPlaylist: (playlist: Playlist) => void;
   onOpenCreatePlaylist: () => void;
+  onOpenImportPlaylist?: () => void;
   onOpenEQ: () => void;
   onOpenSleepTimer: () => void;
   favoritesCount: number;
@@ -39,6 +41,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   selectedPlaylistId,
   onSelectPlaylist,
   onOpenCreatePlaylist,
+  onOpenImportPlaylist,
   onOpenEQ,
   onOpenSleepTimer,
   favoritesCount,
@@ -142,13 +145,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
               我的歌单
             </span>
-            <button
-              onClick={onOpenCreatePlaylist}
-              className="p-1 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition"
-              title="新建歌单"
-            >
-              <Plus className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              {onOpenImportPlaylist && (
+                <button
+                  onClick={onOpenImportPlaylist}
+                  className="p-1 text-slate-400 hover:text-emerald-400 hover:bg-white/10 rounded-lg transition"
+                  title="导入外部歌单 (网易云/QQ)"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <button
+                onClick={onOpenCreatePlaylist}
+                className="p-1 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition"
+                title="新建歌单"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           <div className="space-y-1">

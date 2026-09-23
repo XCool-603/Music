@@ -1,5 +1,5 @@
 import React from 'react';
-import { Heart, ListMusic, FileCode, Sliders, Upload, Moon, User } from 'lucide-react';
+import { Heart, ListMusic, FileCode, Sliders, Upload, Moon, User, DownloadCloud } from 'lucide-react';
 
 interface MyViewProps {
   favoritesCount: number;
@@ -11,6 +11,7 @@ interface MyViewProps {
   onOpenEQ: () => void;
   onNavigateLocalImport: () => void;
   onOpenSleepTimer: () => void;
+  onOpenImportPlaylist?: () => void;
 }
 
 export const MyView: React.FC<MyViewProps> = ({
@@ -23,6 +24,7 @@ export const MyView: React.FC<MyViewProps> = ({
   onOpenEQ,
   onNavigateLocalImport,
   onOpenSleepTimer,
+  onOpenImportPlaylist,
 }) => {
   const tools = [
     {
@@ -67,6 +69,17 @@ export const MyView: React.FC<MyViewProps> = ({
       color: 'text-purple-400 bg-purple-500/15 border-purple-500/25',
       onClick: onOpenSleepTimer,
     },
+    ...(onOpenImportPlaylist
+      ? [
+          {
+            icon: <DownloadCloud className="w-6 h-6" />,
+            label: '歌单导入',
+            desc: '网易云/QQ歌单',
+            color: 'text-violet-400 bg-violet-500/15 border-violet-500/25',
+            onClick: onOpenImportPlaylist,
+          },
+        ]
+      : []),
   ];
 
   return (

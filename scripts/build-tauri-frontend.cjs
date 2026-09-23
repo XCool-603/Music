@@ -34,12 +34,12 @@ child.on('exit', (code) => {
   const files = fs.existsSync(assetsDir) ? fs.readdirSync(assetsDir) : [];
   const jsFiles = files.filter((f) => f.endsWith('.js'));
   const cssFiles = files.filter((f) => f.endsWith('.css'));
-  if (jsFiles.length !== 1) {
-    console.error('[post-build] expected exactly one JS asset in dist-tauri/assets, got:', jsFiles);
+  const jsName = jsFiles.find((f) => f.startsWith('index-')) || jsFiles[0];
+  const cssName = cssFiles.find((f) => f.startsWith('index-')) || cssFiles[0] || null;
+  if (!jsName) {
+    console.error('[post-build] expected at least one JS asset in dist-tauri/assets, got:', jsFiles);
     process.exit(1);
   }
-  const jsName = jsFiles[0];
-  const cssName = cssFiles.length === 1 ? cssFiles[0] : null;
 
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -58,6 +58,9 @@ child.on('exit', (code) => {
     fs.writeFileSync(path.join(embedDir, 'index.html'), embedIndexHtml);
     fs.copyFileSync(path.join(assetsDir, jsName), path.join(embedDir, 'js', 'app.js'));
     if (cssName) fs.copyFileSync(path.join(assetsDir, cssName), path.join(embedDir, 'js', 'app.css'));
+    for (const f of jsFiles) {
+      fs.copyFileSync(path.join(assetsDir, f), path.join(embedDir, 'js', f));
+    }
     for (const f of ['manifest.json', 'sw.js']) {
       const src = path.join(distDir, f);
       if (fs.existsSync(src)) fs.copyFileSync(src, path.join(embedDir, f));

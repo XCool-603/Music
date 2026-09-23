@@ -786,27 +786,96 @@ class AudioEngine {
     this.loadTrackHtml5(playUrl, onEnded, onError);
   }
 
-  private loadTrackHtml5(playUrl: string, onEnded: () => void, onError: (e: unknown) => void) {
+  private async loadTrackHtml5(playUrl: string, onEnded: () => void, onError: (e: unknown) => void) {
     if (!this.audioElement) return;
 
-    const isExternal = this.isExternalCdnUrl(playUrl);
+    // Check offline CacheStorage
+    const finalUrl = await this.getCachedAudioUrl(playUrl);
+
+    const isExternal = this.isExternalCdnUrl(finalUrl);
     if (isExternal) {
       this.ensureCleanAudioElement();
       // Direct CDN stream playback:
       // Leave crossOrigin empty so browser performs standard media request without CORS restrictions.
       this.audioElement.crossOrigin = '';
     } else {
-      this.audioElement.crossOrigin = playUrl.startsWith('http://') || playUrl.startsWith('https://') ? 'anonymous' : '';
+      this.audioElement.crossOrigin = finalUrl.startsWith('http://') || finalUrl.startsWith('https://') ? 'anonymous' : '';
     }
 
     this.audioElement.pause();
-    this.audioElement.src = playUrl;
+    this.audioElement.src = finalUrl;
     this.audioElement.onended = onEnded;
 
     this.audioElement.onerror = (e) => {
-      console.warn('[AudioEngine] Audio stream error on:', playUrl, e);
+      console.warn('[AudioEngine] Audio stream error on:', finalUrl, e);
       onError(e);
     };
+
+    // Asynchronously cache for repeat offline plays
+    if (finalUrl === playUrl && (playUrl.startsWith('http://') || playUrl.startsWith('https://'))) {
+      this.putAudioCache(playUrl);
+    }
+  }
+
+  public async fadeOut(durationMs = 200): Promise<void> {
+    if (!this.audioElement || this.audioElement.paused) return;
+    const startVol = this.audioElement.volume;
+    const steps = 8;
+    const stepTime = durationMs / steps;
+    for (let i = 1; i <= steps; i++) {
+      await new Promise((r) => setTimeout(r, stepTime));
+      if (!this.audioElement) break;
+      this.audioElement.volume = Math.max(0, startVol * (1 - i / steps));
+    }
+  }
+
+  public async fadeIn(targetVol?: number, durationMs = 200): Promise<void> {
+    if (!this.audioElement) return;
+    const target = targetVol !== undefined ? targetVol : this.currentVolume;
+    this.audioElement.volume = 0;
+    const steps = 8;
+    const stepTime = durationMs / steps;
+    for (let i = 1; i <= steps; i++) {
+      await new Promise((r) => setTimeout(r, stepTime));
+      if (!this.audioElement) break;
+      this.audioElement.volume = Math.min(target, target * (i / steps));
+    }
+  }
+
+  private async getCachedAudioUrl(rawUrl: string): Promise<string> {
+    if (typeof window === 'undefined' || !('caches' in window)) return rawUrl;
+    try {
+      const cache = await window.caches.open('muse-audio-v1');
+      const cachedResp = await cache.match(rawUrl);
+      if (cachedResp) {
+        const blob = await cachedResp.blob();
+        if (blob && blob.size > 10000) {
+          return URL.createObjectURL(blob);
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return rawUrl;
+  }
+
+  private async putAudioCache(rawUrl: string): Promise<void> {
+    if (typeof window === 'undefined' || !('caches' in window)) return;
+    try {
+      const cache = await window.caches.open('muse-audio-v1');
+      const has = await cache.match(rawUrl);
+      if (has) return;
+      const res = await fetch(rawUrl, { mode: 'cors' });
+      if (res.ok) {
+        await cache.put(rawUrl, res.clone());
+        const keys = await cache.keys();
+        if (keys.length > 50) {
+          await cache.delete(keys[0]);
+        }
+      }
+    } catch {
+      // Non-CORS or network error — ignore gracefully
+    }
   }
 
   public async play(): Promise<void> {

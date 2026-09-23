@@ -427,3 +427,5 @@ export const MvPlayer: React.FC<MvPlayerProps> = ({ isOpen, onClose, mvId, title
     </div>
   );
 };
+
+export default MvPlayer;
