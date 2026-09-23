@@ -59,7 +59,7 @@ export default class EntryAbility extends UIAbility {
       };
 
       wantAgent.getWantAgent(wantAgentInfo).then((agent: WantAgent) => {
-        backgroundTaskManager.startBackgroundRunningTask(
+        backgroundTaskManager.startBackgroundRunning(
           this.context,
           backgroundTaskManager.BackgroundMode.AUDIO_PLAYBACK,
           agent
@@ -80,7 +80,7 @@ export default class EntryAbility extends UIAbility {
   private stopContinuousTask(): void {
     if (!this.isBackgroundTaskRunning) return;
     try {
-      backgroundTaskManager.stopBackgroundRunningTask(this.context).then(() => {
+      backgroundTaskManager.stopBackgroundRunning(this.context).then(() => {
         this.isBackgroundTaskRunning = false;
         hilog.info(DOMAIN, TAG, 'Continuous background task stopped');
       }).catch((err: BusinessError) => {
