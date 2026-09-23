@@ -1,4 +1,4 @@
-const CACHE_NAME = 'muse-audio-v4';
+const CACHE_NAME = 'muse-audio-v5';
 
 self.addEventListener('install', () => {
   self.skipWaiting();
@@ -15,9 +15,22 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  if (request.method !== 'GET' || request.url.includes('/api/')) {
+
+  // 1. Only intercept same-origin GET requests
+  if (request.method !== 'GET' || !request.url.startsWith(self.location.origin)) {
     return;
   }
+
+  // 2. Never intercept API requests, media streams (audio/video), or Range requests
+  if (
+    request.url.includes('/api/') ||
+    request.destination === 'audio' ||
+    request.destination === 'video' ||
+    request.headers.has('range')
+  ) {
+    return;
+  }
+
   event.respondWith(
     fetch(request)
       .then((response) => {
@@ -27,6 +40,14 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       })
-      .catch(() => caches.match(request).then((cached) => cached))
+      .catch(async () => {
+        const cached = await caches.match(request);
+        if (cached) return cached;
+        return new Response('Network error', {
+          status: 503,
+          statusText: 'Service Unavailable',
+          headers: { 'Content-Type': 'text/plain' },
+        });
+      })
   );
 });

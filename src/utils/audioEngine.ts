@@ -1,5 +1,5 @@
 import { EQPreset, AudioSettings } from '../types';
-import { getApiBase } from './apiBase';
+import { getApiBase, apiUrl } from './apiBase';
 import {
   isNativePlayback,
   nativeSetSource,
@@ -808,11 +808,22 @@ class AudioEngine {
 
     this.audioElement.onerror = (e) => {
       console.warn('[AudioEngine] Audio stream error on:', finalUrl, e);
+      // If direct CDN playback fails (e.g. anti-hotlinking or referrer check),
+      // seamlessly retry via backend proxy once
+      if (isExternal && !finalUrl.includes('/api/proxy/audio')) {
+        const proxyUrl = apiUrl(`/api/proxy/audio?url=${encodeURIComponent(finalUrl)}`);
+        console.warn('[AudioEngine] Retrying stream through backend audio proxy:', proxyUrl);
+        if (this.audioElement) {
+          this.audioElement.src = proxyUrl;
+          this.audioElement.play().catch(() => {});
+          return;
+        }
+      }
       onError(e);
     };
 
-    // Asynchronously cache for repeat offline plays
-    if (finalUrl === playUrl && (playUrl.startsWith('http://') || playUrl.startsWith('https://'))) {
+    // Asynchronously cache for repeat offline plays (only for same-origin or CORS-enabled streams)
+    if (!isExternal && finalUrl === playUrl && (playUrl.startsWith('http://') || playUrl.startsWith('https://'))) {
       this.putAudioCache(playUrl);
     }
   }
@@ -843,7 +854,7 @@ class AudioEngine {
   }
 
   private async getCachedAudioUrl(rawUrl: string): Promise<string> {
-    if (typeof window === 'undefined' || !('caches' in window)) return rawUrl;
+    if (typeof window === 'undefined' || !('caches' in window) || this.isExternalCdnUrl(rawUrl)) return rawUrl;
     try {
       const cache = await window.caches.open('muse-audio-v1');
       const cachedResp = await cache.match(rawUrl);
@@ -860,7 +871,7 @@ class AudioEngine {
   }
 
   private async putAudioCache(rawUrl: string): Promise<void> {
-    if (typeof window === 'undefined' || !('caches' in window)) return;
+    if (typeof window === 'undefined' || !('caches' in window) || this.isExternalCdnUrl(rawUrl)) return;
     try {
       const cache = await window.caches.open('muse-audio-v1');
       const has = await cache.match(rawUrl);

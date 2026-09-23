@@ -629,16 +629,19 @@ internal static class KuwoSigner
         }
 
         long state = (o * long.Parse(n) + l) % c;
-        var sb = new StringBuilder();
-        foreach (var ch in message)
+        var bytes = Encoding.UTF8.GetBytes(message);
+        var hexChars = new char[bytes.Length * 2];
+        const string hexAlphabet = "0123456789abcdef";
+        for (int idx = 0; idx < bytes.Length; idx++)
         {
-            var x = (byte)ch ^ (int)Math.Floor(state / (double)c * 255);
-            sb.Append(x < 16 ? "0" + x.ToString("x") : x.ToString("x"));
+            int factor = (int)((state * 255) / c);
+            int val = (bytes[idx] ^ factor) & 0xFF;
+            hexChars[idx * 2] = hexAlphabet[(val >> 4) & 0x0F];
+            hexChars[idx * 2 + 1] = hexAlphabet[val & 0x0F];
             state = (o * state + l) % c;
         }
-        var dHex = d.ToString("x");
-        while (dHex.Length < 8) dHex = "0" + dHex;
-        return sb.ToString() + dHex;
+        var dHex = d.ToString("x8");
+        return new string(hexChars) + dHex;
     }
 
     /// <summary>
