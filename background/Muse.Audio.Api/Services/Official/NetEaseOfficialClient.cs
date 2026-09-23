@@ -191,8 +191,9 @@ public class NetEaseOfficialClient
             durMs = du.GetInt32();
 
         var coverUrl = cover ?? $"/api/v2/song/pic?source=netease&id={id}";
+        var mvId = V2Json.Str(item, "mvid");
         tracks.Add(V2Tracks.NetEase(id, V2Json.Str(item, "name"), artist, album, durMs / 1000, coverUrl,
-            fee: ReadFee(item)));
+            fee: ReadFee(item), mvId: string.IsNullOrEmpty(mvId) || mvId == "0" ? null : mvId));
     }
 
     /// <summary>
@@ -375,10 +376,83 @@ public class NetEaseOfficialClient
         return lrc;
     }
 
+    // ── MV search (official, plaintext type=1004) ────────────────
+    public async Task<(List<MvInfo> Mvs, int Total)> MvSearchAsync(string q, int page, int limit)
+    {
+        var mvs = new List<MvInfo>();
+        var offset = (Math.Max(1, page) - 1) * limit;
+        var json = await GetJsonAsync(
+            $"{WebBase}/api/search/get?s={Uri.EscapeDataString(q)}&type=1004&offset={offset}&limit={limit}&total=true");
+        if (json is not JsonElement j || !V2Json.TryGetObj(j, "result", out var result))
+            return (mvs, 0);
+
+        var total = result.TryGetProperty("mvCount", out var mc) && mc.ValueKind == JsonValueKind.Number
+            ? mc.GetInt32() : 0;
+        if (!V2Json.TryGetArr(result, "mvs", out var arr))
+            return (mvs, total);
+
+        foreach (var item in arr.EnumerateArray())
+        {
+            var mv = new MvInfo();
+            if (item.TryGetProperty("id", out var id)) mv.Id = id.ToString();
+            if (item.TryGetProperty("name", out var name)) mv.Name = name.GetString() ?? "";
+            if (item.TryGetProperty("artistName", out var artist)) mv.Artist = artist.GetString() ?? "";
+            if (string.IsNullOrEmpty(mv.Artist) && item.TryGetProperty("artists", out var artists)
+                && artists.ValueKind == JsonValueKind.Array && artists.GetArrayLength() > 0
+                && artists[0].TryGetProperty("name", out var aName))
+                mv.Artist = aName.GetString() ?? "";
+            if (item.TryGetProperty("cover", out var cover)) mv.Cover = cover.GetString() ?? "";
+            if (item.TryGetProperty("duration", out var dur) && dur.ValueKind == JsonValueKind.Number)
+                mv.DurationMs = dur.GetInt32();
+            if (item.TryGetProperty("playCount", out var pc) && pc.ValueKind == JsonValueKind.Number)
+                mv.PlayCount = pc.GetInt64();
+            if (!string.IsNullOrEmpty(mv.Id)) mvs.Add(mv);
+        }
+        return (mvs, total);
+    }
+
+    // ── MV play URL (official mv/detail carries direct mp4 links in brs) ──
+    // The old /api/mv/url endpoint is dead and the weapi mv-url channel needs
+    // a logged-in session, but mv/detail's data.brs map ships signed vod.126.net
+    // mp4 links per resolution anonymously — use it directly.
+    public async Task<(string? Url, List<int> Resolutions)> MvUrlAsync(string id, int resolution = 720)
+    {
+        var json = await GetJsonAsync($"{WebBase}/api/mv/detail?id={Uri.EscapeDataString(id)}");
+        if (json is not JsonElement j || !V2Json.TryGetObj(j, "data", out var data)
+            || !V2Json.TryGetObj(data, "brs", out var brs))
+            return (null, new List<int>());
+
+        var parsed = new SortedDictionary<int, string>();
+        foreach (var prop in brs.EnumerateObject())
+        {
+            if (int.TryParse(prop.Name, out var r) && prop.Value.ValueKind == JsonValueKind.String
+                && prop.Value.GetString() is { Length: > 0 } link)
+                parsed[r] = link;
+        }
+        if (parsed.Count == 0) return (null, new List<int>());
+
+        // Pick the highest available resolution not exceeding the request;
+        // fall back to the largest when the request exceeds everything.
+        var chosen = parsed.LastOrDefault(kv => kv.Key <= resolution);
+        if (chosen.Value is null) chosen = parsed.Last();
+        return (chosen.Value, parsed.Keys.ToList());
+    }
+
     private static string JsonEscape(string s) =>
         s.Replace("\\", "\\\\").Replace("\"", "\\\"");
 }
 
 /// <summary>NetEase song meta from official song/detail (title, first artist, copyright fee tier).</summary>
 public readonly record struct NetEaseMeta(string Title, string Artist, int? Fee);
+
+/// <summary>Music-video entry from official search (type=1004).</summary>
+public class MvInfo
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Artist { get; set; } = "";
+    public string Cover { get; set; } = "";
+    public int DurationMs { get; set; }
+    public long PlayCount { get; set; }
+}
 

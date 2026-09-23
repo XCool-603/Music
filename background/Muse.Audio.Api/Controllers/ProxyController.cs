@@ -31,4 +31,16 @@ public class ProxyController : ControllerBase
         }
         await _proxy.PipeAudioProxyAsync(url, referer, ua, HttpContext);
     }
+
+    /// <summary>
+    /// Video alias of the audio pipe: same streaming logic (Range passthrough,
+    /// content-type passthrough) for mp4 MV playback. Media CDNs reject
+    /// cross-origin/hotlinked embeds, so the browser must stream via us.
+    /// </summary>
+    [HttpGet("video")]
+    public Task VideoProxy(
+        [FromQuery] string url = "",
+        [FromQuery] string? referer = null,
+        [FromQuery] string? ua = null)
+        => AudioProxy(url, referer, ua);
 }

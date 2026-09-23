@@ -28,7 +28,17 @@ interface TrackRowProps {
 }
 
 function SourceBadge({ sourceKey }: { sourceKey?: string }) {
-  const isWy = sourceKey === 'wy';
+  if (sourceKey === 'itunes') {
+    return (
+      <span
+        className="px-1.5 py-0.5 rounded text-[10px] font-semibold leading-none border shrink-0 bg-purple-500/15 text-purple-300 border-purple-500/25"
+        title="iTunes 试听源 (30秒)"
+      >
+        果
+      </span>
+    );
+  }
+  const isWy = sourceKey === 'wy' || sourceKey === 'netease';
   return (
     <span
       className={`px-1.5 py-0.5 rounded text-[10px] font-semibold leading-none border shrink-0 ${

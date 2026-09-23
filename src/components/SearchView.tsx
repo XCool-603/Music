@@ -196,7 +196,9 @@ export const SearchView: React.FC<SearchViewProps> = ({
       } catch (err) {
         console.error('Page navigation error:', err);
       } finally {
-        if (seq === onlineSeqRef.current) setIsPageLoading(false);
+        // Always reset loading state — even if seq is stale, we must
+        // not leave isPageLoading stuck on true permanently.
+        setIsPageLoading(false);
       }
     },
     [committedQuery, isPageLoading, isSearchingOnline, onlineTracks.length, platform, scripts]

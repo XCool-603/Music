@@ -242,3 +242,26 @@ export async function setPlaybackState(input: PlaybackStateInput): Promise<boole
     return false;
   }
 }
+
+/**
+ * Control Android background playback service / partial wake lock.
+ * Called when playback starts or stops.
+ */
+export async function setKeepAlive(
+  playing: boolean,
+  title: string = 'MUSE.AUDIO',
+  artist: string = ''
+): Promise<boolean> {
+  if (!canInvoke()) return false;
+  try {
+    await invoke('set_keep_alive', {
+      playing,
+      title: title || 'MUSE.AUDIO',
+      artist: artist || '',
+    });
+    return true;
+  } catch (err) {
+    console.warn('[nativeAudio] setKeepAlive failed:', err);
+    return false;
+  }
+}

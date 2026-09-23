@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ListMusic, Music, Sparkles } from 'lucide-react';
+import { ListMusic, Music, Sparkles, Clapperboard } from 'lucide-react';
 import { Track, Playlist } from '../types';
 import { GENRE_CATEGORIES } from '../data/discoveryData';
 import { BannerCarousel } from './discover/BannerCarousel';
@@ -127,6 +127,21 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
           </button>
         ))}
       </div>
+
+      {/* 3.5 MV Music Video entry */}
+      <button
+        onClick={() => onNavigate('/mv')}
+        className="group w-full flex items-center gap-4 rounded-2xl p-4 text-left bg-gradient-to-r from-indigo-600/30 via-fuchsia-600/20 to-transparent border border-white/10 hover:border-indigo-400/40 transition cursor-pointer"
+      >
+        <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-indigo-900/40 shrink-0">
+          <Clapperboard className="w-5 h-5 text-white" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-white">MV 音乐视频</p>
+          <p className="text-xs text-slate-400 truncate">搜索并观看高清音乐视频 · 网易云音乐官方接口</p>
+        </div>
+        <Sparkles className="w-4 h-4 text-fuchsia-400 group-hover:rotate-12 transition" />
+      </button>
 
       {/* 4. Official toplist (v2 API) */}
       <ToplistSection

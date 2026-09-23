@@ -19,6 +19,9 @@ name: Build HarmonyOS
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   build-harmony:

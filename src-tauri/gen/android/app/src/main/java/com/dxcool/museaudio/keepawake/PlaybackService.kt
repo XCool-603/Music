@@ -65,12 +65,27 @@ class PlaybackService : Service() {
 
   override fun onBind(intent: Intent?): IBinder? = null
 
+  private var focusRequest: android.media.AudioFocusRequest? = null
+
   private fun showNotification(title: String, artist: String) {
     ensureChannel()
+    val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+      flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+    }
+    val pendingIntent = if (launchIntent != null) {
+      android.app.PendingIntent.getActivity(
+        this,
+        0,
+        launchIntent,
+        android.app.PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) android.app.PendingIntent.FLAG_IMMUTABLE else 0)
+      )
+    } else null
+
     val notification = NotificationCompat.Builder(this, CHANNEL_ID)
       .setSmallIcon(android.R.drawable.ic_media_play)
       .setContentTitle(title)
       .setContentText(artist)
+      .setContentIntent(pendingIntent)
       .setOngoing(true)
       .setShowWhen(false)
       .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -118,9 +133,23 @@ class PlaybackService : Service() {
   private fun requestAudioFocus() {
     val am = audioManager ?: return
     try {
-      @Suppress("DEPRECATION")
-      val result = am.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
-      println("[MUSE-AUDIO][keepawake] audio focus request result: $result")
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val playbackAttributes = android.media.AudioAttributes.Builder()
+          .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+          .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+          .build()
+        val request = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+          .setAudioAttributes(playbackAttributes)
+          .setAcceptsDelayedFocusGain(true)
+          .setOnAudioFocusChangeListener { /* handle system audio focus */ }
+          .build()
+        focusRequest = request
+        am.requestAudioFocus(request)
+      } else {
+        @Suppress("DEPRECATION")
+        val result = am.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+        println("[MUSE-AUDIO][keepawake] audio focus request result: $result")
+      }
     } catch (e: Exception) {
       // ignore
     }
@@ -128,8 +157,13 @@ class PlaybackService : Service() {
 
   private fun abandonAudioFocus() {
     try {
-      @Suppress("DEPRECATION")
-      audioManager?.abandonAudioFocus(null)
+      val am = audioManager ?: return
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        focusRequest?.let { am.abandonAudioFocusRequest(it) }
+      } else {
+        @Suppress("DEPRECATION")
+        am.abandonAudioFocus(null)
+      }
     } catch (e: Exception) {
       // ignore
     }

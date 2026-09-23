@@ -401,6 +401,7 @@ class AudioEngine {
   private trebleFilter: BiquadFilterNode | null = null;
   private eq10Filters: BiquadFilterNode[] = [];
   private eq15Filters: BiquadFilterNode[] = [];
+  private activeEQMode: '10' | '15' = '10';
   private tubeWarmthNode: WaveShaperNode | null = null;
   private tubeDryGain: GainNode | null = null;
   private tubeWetGain: GainNode | null = null;
@@ -415,7 +416,6 @@ class AudioEngine {
   private isConnectedToGraph = false;
   private currentVolume = 0.85;
   private currentRawUrl = '';
-  private isProxyRetry = false;
   private simulatedPhase = 0;
   private impulseBuffers: { [key: string]: AudioBuffer } = {};
   // Native (iOS AVPlayer) playback routing. When enabled, playback control and
@@ -449,7 +449,25 @@ class AudioEngine {
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!AudioCtxClass) return;
 
-      this.audioCtx = new AudioCtxClass();
+      this.audioCtx = new AudioCtxClass({
+        latencyHint: 'playback',
+      });
+
+      // Keep WebAudio context active when the app is backgrounded or screen locked.
+      // Mobile WebViews automatically suspend AudioContext on visibility change;
+      // auto-resume immediately if audio is playing.
+      this.audioCtx.onstatechange = () => {
+        if (this.audioCtx?.state === 'suspended' && this.audioElement && !this.audioElement.paused) {
+          this.audioCtx.resume().catch(() => {});
+        }
+      };
+      if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', () => {
+          if (this.audioCtx?.state === 'suspended' && this.audioElement && !this.audioElement.paused) {
+            this.audioCtx.resume().catch(() => {});
+          }
+        });
+      }
 
       // 1. Analyser Node
       this.analyser = this.audioCtx.createAnalyser();
@@ -484,6 +502,9 @@ class AudioEngine {
       this.trebleFilter.type = 'highshelf';
       this.trebleFilter.frequency.value = 12000;
       this.trebleFilter.gain.value = 0;
+
+      // Track which EQ bank is currently active in the audio graph
+      this.activeEQMode = '10';
 
       // 7. 10-Band EQ Filters
       this.eq10Filters = EQ_FREQUENCIES_10.map((freq, index) => {
@@ -582,11 +603,12 @@ class AudioEngine {
       this.bassFilter!.connect(this.vocalFilter!);
       this.vocalFilter!.connect(this.trebleFilter!);
 
-      // Connect 10-Band cascade
+      // Connect active EQ cascade (10-band by default; setBandsMode switches)
       let currentOut: AudioNode = this.trebleFilter!;
-      for (let i = 0; i < this.eq10Filters.length; i++) {
-        currentOut.connect(this.eq10Filters[i]);
-        currentOut = this.eq10Filters[i];
+      const activeFilters = this.activeEQMode === '15' ? this.eq15Filters : this.eq10Filters;
+      for (let i = 0; i < activeFilters.length; i++) {
+        currentOut.connect(activeFilters[i]);
+        currentOut = activeFilters[i];
       }
 
       // Tube warmth mix
@@ -638,6 +660,33 @@ class AudioEngine {
     }
   }
 
+  public isExternalCdnUrl(rawUrl: string): boolean {
+    if (!rawUrl || typeof rawUrl !== 'string') return false;
+    const trimmed = rawUrl.trim();
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return false;
+    const base = getApiBase();
+    if (base && trimmed.startsWith(base)) return false;
+    if (typeof window !== 'undefined' && trimmed.startsWith(window.location.origin)) return false;
+    return true;
+  }
+
+  private ensureCleanAudioElement() {
+    if (this.sourceNode) {
+      // An Audio element already hooked to createMediaElementSource will be silenced
+      // by the browser when playing cross-origin audio without CORS headers.
+      // Reset and create a clean unhooked Audio element for direct speaker output.
+      if (this.audioElement) {
+        this.audioElement.pause();
+        this.audioElement.src = '';
+      }
+      this.audioElement = new Audio();
+      this.audioElement.preload = 'auto';
+      this.audioElement.volume = this.currentVolume;
+      this.sourceNode = null;
+      this.isConnectedToGraph = false;
+    }
+  }
+
   public normalizeAudioUrl(rawUrl: string): string {
     if (!rawUrl || typeof rawUrl !== 'string' || rawUrl.trim() === '') {
       return '';
@@ -650,17 +699,13 @@ class AudioEngine {
     if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
       return trimmed;
     }
-    const isHttp = trimmed.startsWith('http://') || trimmed.startsWith('https://');
 
-    if (isHttp && !trimmed.startsWith(`${getApiBase()}/api/proxy/audio`)) {
-      // Absolute CDN links (Kuwo car-*.kuwo.cn, JS source scripts, etc.) never
-      // carry Access-Control-Allow-Origin, so a crossOrigin='anonymous' media
-      // request is rejected by CORS before the first byte — playback then had
-      // to be rescued by the onerror fallback. Route them through our own
-      // proxy instead: same-origin, ACAO:*, Range passthrough, WebAudio-safe.
-      const base = getApiBase();
-      return `${base}/api/proxy/audio?url=${encodeURIComponent(trimmed)}`;
+    // For URLs that are already proxied, pass through as-is.
+    if (trimmed.startsWith(`${getApiBase()}/api/proxy/audio`)) {
+      return trimmed;
     }
+
+    // Direct CDN links pass through directly for zero-bandwidth streaming.
     return trimmed;
   }
 
@@ -714,7 +759,6 @@ class AudioEngine {
     this.initAudioElement();
 
     this.currentRawUrl = url;
-    this.isProxyRetry = false;
 
     const playUrl = this.normalizeAudioUrl(url);
 
@@ -722,14 +766,15 @@ class AudioEngine {
       // Native AVPlayer: hand the resolved URL straight to the plugin and let it
       // own loading + background playback. If the plugin call fails, fall back to
       // the HTML5 path so the session still works.
-      const resumePos = this.getCurrentTime();
+      // New track always starts from the beginning (position 0).
+      // getCurrentTime() here still reflects the PREVIOUS track's position.
       this.lastNativeMeta = metadata;
       const ok = await nativeSetSource(playUrl, {
         title: metadata?.title,
         artist: metadata?.artist,
         album: metadata?.album,
         duration: metadata?.duration || 0,
-      }, resumePos);
+      }, 0);
       if (ok) {
         return;
       }
@@ -744,13 +789,15 @@ class AudioEngine {
   private loadTrackHtml5(playUrl: string, onEnded: () => void, onError: (e: unknown) => void) {
     if (!this.audioElement) return;
 
-    // When playing a cross-origin CDN link directly through the WebAudio DSP
-    // graph (createMediaElementSource), the CDN MUST return Access-Control-Allow-Origin
-    // or the graph outputs silence. crossOrigin='anonymous' makes the browser send a
-    // CORS request: CDNs that allow it play directly (single bandwidth); CDNs that
-    // block it fire onerror below and we fall back to the backend proxy (which
-    // appends Access-Control-Allow-Origin: * so WebAudio can output audio).
-    this.audioElement.crossOrigin = playUrl.startsWith('http://') || playUrl.startsWith('https://') ? 'anonymous' : '';
+    const isExternal = this.isExternalCdnUrl(playUrl);
+    if (isExternal) {
+      this.ensureCleanAudioElement();
+      // Direct CDN stream playback:
+      // Leave crossOrigin empty so browser performs standard media request without CORS restrictions.
+      this.audioElement.crossOrigin = '';
+    } else {
+      this.audioElement.crossOrigin = playUrl.startsWith('http://') || playUrl.startsWith('https://') ? 'anonymous' : '';
+    }
 
     this.audioElement.pause();
     this.audioElement.src = playUrl;
@@ -758,33 +805,6 @@ class AudioEngine {
 
     this.audioElement.onerror = (e) => {
       console.warn('[AudioEngine] Audio stream error on:', playUrl, e);
-      if (!this.isProxyRetry && this.currentRawUrl && !playUrl.startsWith(`${getApiBase()}/api/proxy/audio`)) {
-        this.isProxyRetry = true;
-        const proxiedUrl = `${getApiBase()}/api/proxy/audio?url=${encodeURIComponent(this.currentRawUrl)}`;
-        if (this.audioElement) {
-          // Remember where playback was so the fallback RESUMES instead of
-          // restarting the track from zero (e.g. a mid-track seek whose Range
-          // request failed on the direct CDN link).
-          const resumeAt = this.audioElement.currentTime || 0;
-          // Proxy responses come from our own origin with ACAO:* — clear crossOrigin
-          // so the WebAudio MediaElementSource gets real samples, not zeroes.
-          this.audioElement.crossOrigin = '';
-          this.audioElement.src = proxiedUrl;
-          const resumeSeek = () => {
-            this.audioElement?.removeEventListener('loadedmetadata', resumeSeek);
-            if (resumeAt > 1 && this.audioElement) {
-              try {
-                this.audioElement.currentTime = resumeAt;
-              } catch {
-                /* seek after reload may throw if metadata not ready */
-              }
-            }
-          };
-          this.audioElement.addEventListener('loadedmetadata', resumeSeek);
-          this.audioElement.play().catch(() => {});
-        }
-        return;
-      }
       onError(e);
     };
   }
@@ -794,7 +814,10 @@ class AudioEngine {
       nativePlay();
       return;
     }
-    await this.resume();
+    // Only connect Web Audio graph if NOT playing a direct external CDN stream without CORS
+    if (!this.isExternalCdnUrl(this.currentRawUrl)) {
+      await this.resume();
+    }
     if (!this.audioElement) return;
     try {
       await this.audioElement.play();
@@ -846,7 +869,29 @@ class AudioEngine {
 
   // --- Professional EQ & DSP Setters ---
 
-  public setBandsMode(_mode: '10' | '15') {
+  public setBandsMode(mode: '10' | '15') {
+    if (!this.audioCtx || !this.trebleFilter || mode === this.activeEQMode) return;
+
+    // Disconnect old EQ cascade from treble filter output
+    const oldFilters = this.activeEQMode === '15' ? this.eq15Filters : this.eq10Filters;
+    try {
+      this.trebleFilter.disconnect();
+      oldFilters.forEach((f) => { try { f.disconnect(); } catch { /* noop */ } });
+    } catch { /* noop */ }
+
+    // Connect new EQ cascade
+    const newFilters = mode === '15' ? this.eq15Filters : this.eq10Filters;
+    let currentOut: AudioNode = this.trebleFilter;
+    for (const filter of newFilters) {
+      currentOut.connect(filter);
+      currentOut = filter;
+    }
+
+    // Reconnect downstream: tube warmth
+    if (this.tubeDryGain) currentOut.connect(this.tubeDryGain);
+    if (this.tubeWarmthNode) currentOut.connect(this.tubeWarmthNode);
+
+    this.activeEQMode = mode;
   }
 
   public setEQGains(gains: number[], mode: '10' | '15' = '10') {

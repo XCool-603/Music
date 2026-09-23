@@ -1,4 +1,4 @@
-const CACHE_NAME = 'muse-audio-v2';
+const CACHE_NAME = 'muse-audio-v4';
 
 self.addEventListener('install', () => {
   self.skipWaiting();

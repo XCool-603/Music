@@ -332,12 +332,57 @@ export function parseScriptMetadata(code: string): Partial<CustomSourceScript> {
 
 /**
  * 洛雪 JS 脚本沙箱运行时执行器
+ *
+ * Use `SourceScriptRunner.getCached(script)` to reuse an already-initialised
+ * runner instead of re-compiling the script source with `new Function()` on
+ * every search / playback call.
  */
 export class SourceScriptRunner {
   public script: CustomSourceScript;
   private eventHandlers: Map<string, Function> = new Map();
   public initedData: any = null;
   private exportResult: any = null;
+
+  // ── Runner instance cache ─────────────────────────────────────────────
+  // Keyed by `${script.id}::${hash}` where hash = first 64 chars of rawCode.
+  // Avoids the expensive `new Function(fullScriptSource)` on every single
+  // search keystroke or track play.
+  private static _cache = new Map<string, SourceScriptRunner>();
+
+  private static _cacheKey(s: CustomSourceScript): string {
+    // Use id + a fingerprint of the code so edits invalidate the cache.
+    const codeFP = (s.rawCode || '').slice(0, 64) + ':' + (s.rawCode || '').length;
+    return `${s.id}::${codeFP}`;
+  }
+
+  /**
+   * Return an already-initialised runner if the script hasn't changed,
+   * otherwise create + init a fresh one and cache it.
+   */
+  public static async getCached(script: CustomSourceScript): Promise<SourceScriptRunner | null> {
+    const key = SourceScriptRunner._cacheKey(script);
+    const cached = SourceScriptRunner._cache.get(key);
+    if (cached) return cached;
+
+    const runner = new SourceScriptRunner(script);
+    const res = await runner.init();
+    if (!res.success) return null;
+
+    // Evict old entries for the same script id (different code version).
+    for (const [k] of SourceScriptRunner._cache) {
+      if (k.startsWith(`${script.id}::`)) {
+        SourceScriptRunner._cache.delete(k);
+        break;
+      }
+    }
+    SourceScriptRunner._cache.set(key, runner);
+    return runner;
+  }
+
+  /** Remove all cached runners (e.g. when the user deletes scripts). */
+  public static clearCache(): void {
+    SourceScriptRunner._cache.clear();
+  }
 
   constructor(script: CustomSourceScript) {
     this.script = script;
@@ -399,10 +444,14 @@ export class SourceScriptRunner {
           // 优先通过全栈服务端透明代理发起网络请求 (突破浏览器跨域限制与受限 Header)
           const backendBase = getApiBase();
           const executeProxy = async () => {
+            // Abort proxy requests that stall for too long so the UI stays responsive.
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 8000);
             try {
               const res = await fetch(`${backendBase}/api/proxy/request`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                signal: controller.signal,
                 body: JSON.stringify({
                   url,
                   method,
@@ -425,32 +474,43 @@ export class SourceScriptRunner {
                 return resp;
               }
               throw new Error(`Proxy status ${res.status}`);
-            } catch (proxyErr) {
-              console.warn('[ScriptRunner] Proxy request failed, trying direct fetch:', proxyErr);
-              try {
-                const directRes = await fetch(url, {
-                  method,
-                  headers: reqOptions.headers,
-                  body: reqOptions.body ? (typeof reqOptions.body === 'string' ? reqOptions.body : JSON.stringify(reqOptions.body)) : undefined,
-                });
-                const text = await directRes.text();
-                let body: any = text;
+            } catch (proxyErr: any) {
+              // Direct browser fetch to third-party music APIs will almost always
+              // be blocked by CORS. Only attempt it for same-origin / CORS-safe URLs.
+              const isSameOrigin = url.startsWith('/') || url.startsWith(window.location.origin);
+              if (isSameOrigin) {
                 try {
-                  body = JSON.parse(text);
-                } catch {}
-                const resp = {
-                  statusCode: directRes.status,
-                  status: directRes.status,
-                  headers: {},
-                  body,
-                  rawBody: text,
-                };
-                cb(null, resp, body);
-                return resp;
-              } catch (directErr) {
-                cb(directErr, null, null);
-                throw directErr;
+                  const directRes = await fetch(url, {
+                    method,
+                    headers: reqOptions.headers,
+                    body: reqOptions.body ? (typeof reqOptions.body === 'string' ? reqOptions.body : JSON.stringify(reqOptions.body)) : undefined,
+                  });
+                  const text = await directRes.text();
+                  let body: any = text;
+                  try { body = JSON.parse(text); } catch {}
+                  const resp = {
+                    statusCode: directRes.status,
+                    status: directRes.status,
+                    headers: {},
+                    body,
+                    rawBody: text,
+                  };
+                  cb(null, resp, body);
+                  return resp;
+                } catch (directErr) {
+                  cb(directErr, null, null);
+                  throw directErr;
+                }
               }
+              // Cross-origin URL: don't attempt direct fetch (CORS will block it).
+              // Return the proxy error to the callback instead.
+              const errMsg = proxyErr?.name === 'AbortError'
+                ? '代理请求超时 (8s)'
+                : proxyErr?.message || '代理请求失败';
+              cb(new Error(errMsg), null, null);
+              throw proxyErr;
+            } finally {
+              clearTimeout(timeout);
             }
           };
 
@@ -871,18 +931,23 @@ export async function searchAggregatedOnlineMusic(
 
   const results: Track[] = [];
 
-  // 1. 洛雪 / 用户 JS 音源脚本为「主检索源」，结果置前。每个脚本在沙箱中独立
-  //    执行，搜索命中即优先采用（真正让洛雪脚本成为前端主力检索链路）。
-  for (const script of enabledScripts) {
-    try {
-      const runner = new SourceScriptRunner(script);
-      const initRes = await runner.init();
-      if (initRes.success && runner.hasSearchAction()) {
-        const customResults = await runner.search(trimmed, page);
-        customResults.forEach(pushUnique);
+  // 1. 洛雪 / 用户 JS 音源脚本为「主检索源」，结果置前。
+  //    使用 Promise.allSettled 并行执行所有脚本搜索，避免串行阻塞。
+  //    getCached() 复用已初始化的 runner 实例，跳过重复的 new Function 编译。
+  if (enabledScripts.length > 0) {
+    const scriptSearches = enabledScripts.map(async (script) => {
+      const runner = await SourceScriptRunner.getCached(script);
+      if (runner && runner.hasSearchAction()) {
+        return runner.search(trimmed, page);
       }
-    } catch (e) {
-      console.warn(`[Aggregator] Script ${script.name} search failed:`, e);
+      return [];
+    });
+
+    const settled = await Promise.allSettled(scriptSearches);
+    for (const result of settled) {
+      if (result.status === 'fulfilled') {
+        result.value.forEach(pushUnique);
+      }
     }
   }
 
@@ -890,14 +955,31 @@ export async function searchAggregatedOnlineMusic(
   //    只有当脚本没有命中足够结果时才作为补充，保证“洛雪为主、后台兜底”。
   const backendRaw: any[] = [];
   try {
-    const searchUrl = API_V2
-      ? `${getApiBase()}/api/v2/search?q=${encodeURIComponent(trimmed)}&page=${page}&limit=30&source=${platform}`
-      : `${getApiBase()}/api/music/search?q=${encodeURIComponent(trimmed)}&page=${page}&limit=30&source=${platform}`;
-    const res = await fetch(searchUrl);
-    if (res.ok) {
-      const data = await res.json();
-      const raw = Array.isArray(data?.tracks) ? data.tracks : Array.isArray(data?.list) ? data.list : [];
-      backendRaw.push(...raw);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6000);
+    try {
+      // Try v2 first if enabled
+      if (API_V2) {
+        const v2Url = `${getApiBase()}/api/v2/search?q=${encodeURIComponent(trimmed)}&page=${page}&limit=30&source=${platform}`;
+        const res = await fetch(v2Url, { signal: ctrl.signal });
+        if (res.ok) {
+          const data = await res.json();
+          const raw = Array.isArray(data?.tracks) ? data.tracks : [];
+          backendRaw.push(...raw);
+        }
+      }
+      // v1 fallback: when v2 is disabled or returned empty
+      if (backendRaw.length === 0) {
+        const v1Url = `${getApiBase()}/api/music/search?q=${encodeURIComponent(trimmed)}&page=${page}&limit=30&source=${platform}`;
+        const res = await fetch(v1Url, { signal: ctrl.signal });
+        if (res.ok) {
+          const data = await res.json();
+          const raw = Array.isArray(data?.list) ? data.list : [];
+          backendRaw.push(...raw);
+        }
+      }
+    } finally {
+      clearTimeout(timer);
     }
   } catch (err) {
     console.log('[Aggregator] Backend full search fallback:', err);
@@ -936,16 +1018,76 @@ export async function searchAggregatedOnlineMusic(
     });
   }
 
-  // 3. 最后一级开放兜底：当脚本与后台都为空时才回退到 iTunes 试听源。
+  // 3. 公共开放音乐源免后台直连检索（酷我开放源，无需自建后台，支持全长 320k 完整音频）
+  if (results.length === 0 && platform !== 'netease') {
+    try {
+      const kuwoData = await fetchKuwoSearchData(trimmed, page);
+      const absList = Array.isArray(kuwoData?.abslist) ? kuwoData.abslist : [];
+      if (absList.length > 0) {
+        absList.forEach((item: any) => {
+          const rid = item.DC_TARGETID || item.MUSICRID?.replace('MUSIC_', '') || '';
+          if (!rid) return;
+          const durationSec = parseInt(item.DURATION, 10) || 240;
+          const songTitle = cleanKuwoText(item.SONGNAME || item.NAME || '未知单曲');
+          const artistName = cleanKuwoText(item.ARTIST || item.FARTIST || '未知歌手');
+          const albumName = cleanKuwoText(item.ALBUM || '单曲合辑');
+
+          let coverUrl = 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&auto=format&fit=crop&q=80';
+          if (item.web_albumpic_short) {
+            coverUrl = `https://img1.kuwo.cn/star/albumcover/${item.web_albumpic_short}`;
+          } else if (item.hts_MVPIC) {
+            coverUrl = item.hts_MVPIC;
+          } else if (item.MVPIC) {
+            coverUrl = `https://img1.kuwo.cn/wmvpic/${item.MVPIC}`;
+          }
+
+          const directAudio = `https://musicapi.haitangw.net/music/kw.php?type=mp3&id=${rid}&level=standard`;
+
+          const t: Track = {
+            id: `kw_${rid}`,
+            title: songTitle,
+            artist: artistName,
+            album: albumName,
+            duration: durationSec,
+            coverUrl,
+            audioUrl: directAudio,
+            genre: '流行音乐',
+            lyrics: `[00:00.00]${songTitle} - ${artistName}\n[00:03.00]专辑: ${albumName}\n[00:06.00]酷我直连原声音频流已就绪 (完整版 320kbps MP3)`,
+            bitrate: '320kbps / 完整全长',
+            sourceScriptId: undefined,
+            sourceName: '酷我音乐 (公共开放源)',
+            sourceKey: 'kw',
+            sourceRawInfo: {
+              id: rid,
+              songmid: rid,
+              name: songTitle,
+              singer: artistName,
+              albumName,
+              interval: durationSec,
+              img: coverUrl,
+              audioUrl: directAudio,
+            },
+          };
+          pushUnique(t);
+        });
+      }
+    } catch (err) {
+      console.log('[Aggregator] Kuwo direct search fallback:', err);
+    }
+  }
+
+  // 4. 最终级试听兜底：当脚本、后台、开放源都为空时才回退到 iTunes 试听源。
   if (results.length === 0) {
+    const itunesCtrl = new AbortController();
+    const itunesTimer = setTimeout(() => itunesCtrl.abort(), 5000);
     try {
       let itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(trimmed)}&entity=song&limit=25&country=CN`;
-      let res = await fetch(itunesUrl);
+      let res = await fetch(itunesUrl, { signal: itunesCtrl.signal });
       let data = res.ok ? await res.json() : null;
 
       if (!data || !data.results || data.results.length === 0) {
         itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(trimmed)}&entity=song&limit=25`;
-        res = await fetch(itunesUrl);
+        res = await fetch(itunesUrl, { signal: itunesCtrl.signal });
         data = res.ok ? await res.json() : null;
       }
 
@@ -960,21 +1102,21 @@ export async function searchAggregatedOnlineMusic(
             title: item.trackName || '未知单曲',
             artist: item.artistName || '未知歌手',
             album: item.collectionName || '单曲合辑',
-            duration: Math.round((item.trackTimeMillis || 180000) / 1000),
+            duration: 30, // iTunes 开放 API 仅提供 30 秒试听预览片段
             coverUrl: highResCover,
             audioUrl: item.previewUrl || '',
             genre: item.primaryGenreName || '流行音乐',
-            lyrics: `[00:00.00]${item.trackName || '单曲'} - ${item.artistName || '未知歌手'}\n[00:03.00]专辑: ${item.collectionName || '单曲合辑'}\n[00:10.00]高保真原声音频流已就绪 (AAC 256k / FLAC)`,
-            bitrate: '320k',
+            lyrics: `[00:00.00]${item.trackName || '单曲'} - ${item.artistName || '未知歌手'}\n[00:03.00]专辑: ${item.collectionName || '单曲合辑'}\n[00:06.00]Apple iTunes 开放试听片段 (30秒片段)`,
+            bitrate: '30秒片段 / 开放试听',
             sourceScriptId: undefined,
-            sourceName: 'iTunes 开放试听',
-            sourceKey: 'wy',
+            sourceName: 'iTunes 试听 (30秒)',
+            sourceKey: 'itunes',
             sourceRawInfo: {
               id: String(item.trackId),
               name: item.trackName,
               singer: item.artistName,
               albumName: item.collectionName,
-              interval: Math.round((item.trackTimeMillis || 180000) / 1000),
+              interval: 30,
               img: highResCover,
               audioUrl: item.previewUrl || '',
             },
@@ -984,8 +1126,92 @@ export async function searchAggregatedOnlineMusic(
       }
     } catch (err) {
       console.log('[Aggregator] Online search fallback:', err);
+    } finally {
+      clearTimeout(itunesTimer);
     }
   }
 
   return results;
+}
+
+function cleanKuwoText(str?: string): string {
+  if (!str) return '';
+  return str
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
+async function fetchKuwoSearchData(query: string, page: number): Promise<any> {
+  const url = `https://search.kuwo.cn/r.s?client=kt&all=${encodeURIComponent(query)}&pn=${page - 1}&rn=30&uid=794764098&ver=kwplayer_ar_9.2.2.1&vipver=1&show_copyright_off=1&newsearch=1&ft=music&cluster=0&strategy=2012&encoding=utf8&rformat=json&vermerge=1&mobi=1`;
+
+  // 1. 优先尝试直接 fetch（在 Tauri 原生桌面端、Capacitor 移动端、以及配有反代的 Web 端直接成功）
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5000);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      if (res.ok) {
+        const text = await res.text();
+        try {
+          return JSON.parse(text);
+        } catch {
+          try {
+            return new Function('return ' + text)();
+          } catch {
+            return JSON.parse(text.replace(/'/g, '"'));
+          }
+        }
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    // direct fetch failed (e.g. browser CORS)
+  }
+
+  // 2. 在纯 Web 浏览器无反代环境下，使用 JSONP 完美绕过跨域限制（Kuwo 原生支持 callback）
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    return new Promise((resolve, reject) => {
+      const cbName = `__kuwo_jsonp_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error('Kuwo JSONP timeout'));
+      }, 6000);
+
+      const script = document.createElement('script');
+      script.src = `${url}&callback=${cbName}`;
+      script.async = true;
+
+      const cleanup = () => {
+        clearTimeout(timer);
+        try { delete (window as any)[cbName]; } catch {}
+        try { delete (window as any).jsonError; } catch {}
+        if (script.parentNode) {
+          script.parentNode.removeChild(script);
+        }
+      };
+
+      (window as any)[cbName] = (data: any) => {
+        cleanup();
+        resolve(data);
+      };
+      (window as any).jsonError = (err: any) => {
+        cleanup();
+        reject(err);
+      };
+      script.onerror = () => {
+        cleanup();
+        reject(new Error('Kuwo JSONP script failed'));
+      };
+
+      document.head.appendChild(script);
+    });
+  }
+
+  return null;
 }

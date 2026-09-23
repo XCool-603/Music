@@ -253,14 +253,9 @@ export async function downloadTrackAudio(
         }
       }
 
-      const allChunks = new Uint8Array(receivedBytes);
-      let position = 0;
-      for (const chunk of chunks) {
-        allChunks.set(chunk, position);
-        position += chunk.length;
-      }
-
-      const blob = new Blob([allChunks], { type: 'audio/mpeg' });
+      // Pass chunks array directly to Blob — avoids an extra full copy.
+      const mimeType = filename.endsWith('.flac') ? 'audio/flac' : 'audio/mpeg';
+      const blob = new Blob(chunks, { type: mimeType });
       triggerBlobDownload(blob, filename);
     }
 

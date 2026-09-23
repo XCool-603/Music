@@ -1,0 +1,58 @@
+[default]
+description = "MUSE.AUDIO default permissions: native audio playback bridge, keep-awake and playback-state sync."
+permissions = [
+  "allow-set-keep-alive",
+  "allow-set-playback-state",
+  "allow-native-playback-available",
+  "allow-native-set-source",
+  "allow-native-play",
+  "allow-native-pause",
+  "allow-native-seek",
+  "allow-native-set-rate",
+  "allow-native-register-sink",
+]
+
+[[permission]]
+identifier = "allow-set-keep-alive"
+description = "Allows controlling the keep-awake flag while music plays."
+commands.allow = ["set_keep_alive"]
+
+[[permission]]
+identifier = "allow-set-playback-state"
+description = "Allows updating lock-screen / Control Center playback state."
+commands.allow = ["set_playback_state"]
+
+[[permission]]
+identifier = "allow-native-playback-available"
+description = "Allows querying whether the native AVPlayer playback bridge is available."
+commands.allow = ["native_playback_available"]
+
+[[permission]]
+identifier = "allow-native-set-source"
+description = "Allows loading a track URL into the native AVPlayer."
+commands.allow = ["native_set_source"]
+
+[[permission]]
+identifier = "allow-native-play"
+description = "Allows starting native AVPlayer playback."
+commands.allow = ["native_play"]
+
+[[permission]]
+identifier = "allow-native-pause"
+description = "Allows pausing native AVPlayer playback."
+commands.allow = ["native_pause"]
+
+[[permission]]
+identifier = "allow-native-seek"
+description = "Allows seeking the native AVPlayer to a position."
+commands.allow = ["native_seek"]
+
+[[permission]]
+identifier = "allow-native-set-rate"
+description = "Allows changing the native AVPlayer playback rate."
+commands.allow = ["native_set_rate"]
+
+[[permission]]
+identifier = "allow-native-register-sink"
+description = "Allows registering the native playback event back-channel."
+commands.allow = ["native_register_sink"]

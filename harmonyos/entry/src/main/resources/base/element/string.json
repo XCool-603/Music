@@ -11,6 +11,10 @@
     {
       "name": "EntryAbility_label",
       "value": "MUSE.AUDIO"
+    },
+    {
+      "name": "keep_background_running_reason",
+      "value": "用于音乐后台持续播放与锁屏控制"
     }
   ]
 }

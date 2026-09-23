@@ -39,15 +39,51 @@
     <meta name="twitter:card" content="summary_large_image" />
 
     <!-- Capacitor / iOS safe area -->
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <style>
       body { margin: 0; padding: 0; background: #0a0a0f; }
+      /* Startup splash — covers the blank screen until React mounts and
+         discovery data settles. Removed by App/main with a fade-out. */
+      #splash {
+        position: fixed; inset: 0; z-index: 9999;
+        background: #0a0a0f;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 18px; transition: opacity .35s ease;
+      }
+      #splash .splash-logo {
+        width: 76px; height: 76px; border-radius: 22px;
+        background: linear-gradient(135deg, #10b981, #6366f1);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 34px; font-weight: 800; color: #fff; letter-spacing: -1px;
+        box-shadow: 0 12px 40px rgba(16, 185, 129, .25);
+      }
+      #splash .splash-word {
+        color: #94a3b8; font-size: 13px; letter-spacing: .4em; text-indent: .4em; font-weight: 600;
+      }
+      #splash .splash-spinner {
+        width: 22px; height: 22px; border-radius: 50%;
+        border: 2px solid rgba(148, 163, 184, .25); border-top-color: #10b981;
+        animation: splash-spin .8s linear infinite;
+      }
+      @keyframes splash-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { #splash .splash-spinner { animation: none; } }
     </style>
     <script type="module" crossorigin src="./js/app.js"></script>
     <link rel="stylesheet" crossorigin href="./js/app.css">
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"></div>
+    <div id="splash">
+      <div class="splash-logo">M</div>
+      <div class="splash-word">MUSE.AUDIO</div>
+      <div class="splash-spinner"></div>
+    </div>
+    <script>
+      // Fail-safe: never trap the user behind the splash if the backend hangs.
+      setTimeout(function () {
+        var el = document.getElementById('splash');
+        if (el) { el.style.opacity = '0'; setTimeout(function () { el.remove(); }, 400); }
+      }, 3000);
+    </script>
     <script>
       if ('serviceWorker' in navigator && !window.__TAURI_INTERNALS__) {
         window.addEventListener('load', () => {

@@ -23,6 +23,8 @@ export interface Track {
   sourceKey?: string;
   sourceName?: string;
   sourceRawInfo?: any;
+  /** NetEase 歌曲关联的 MV id(用于“看 MV”入口)。 */
+  mvid?: string;
 }
 
 export interface Playlist {
@@ -43,6 +45,7 @@ export type VisualizerMode = 'bars' | 'wave' | 'circle' | 'neon';
 export type ActiveTab = 
   | 'discover'
   | 'search'
+  | 'mv'
   | 'library'
   | 'favorites'
   | 'sources'

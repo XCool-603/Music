@@ -155,4 +155,36 @@ public class V2MusicController : ControllerBase
         }
         return Redirect(resolved);
     }
+
+    // ── MV (music videos, NetEase official) ────────────────────────
+
+    /// <summary>Search official music videos by keyword.</summary>
+    [HttpGet("mv/search")]
+    public async Task<IActionResult> MvSearch(
+        [FromQuery] string q = "",
+        [FromQuery] int page = 1,
+        [FromQuery] int limit = 30)
+    {
+        var query = q.Trim();
+        if (string.IsNullOrEmpty(query))
+            return Ok(new { mvs = Array.Empty<object>(), total = 0, page, limit });
+        var (mvs, total) = await _v2.MvSearchAsync(query, page, Math.Clamp(limit, 1, 60));
+        return Ok(new { mvs, total, page, limit });
+    }
+
+    /// <summary>Resolve an mp4 play URL for an MV at the requested resolution.</summary>
+    [HttpGet("mv/url")]
+    public async Task<IActionResult> MvUrl(
+        [FromQuery] string id = "",
+        [FromQuery] int r = 720)
+    {
+        Response.Headers["Access-Control-Allow-Origin"] = "*";
+        var (url, resolutions) = await _v2.MvUrlAsync(id.Trim(), r);
+        if (string.IsNullOrEmpty(url))
+        {
+            Response.StatusCode = 404;
+            return new ObjectResult(new { url = "", error = "mv_unavailable", id, r });
+        }
+        return Ok(new { url, resolutions, id, r });
+    }
 }

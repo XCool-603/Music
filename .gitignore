@@ -38,3 +38,6 @@ release/
 **/wwwroot/music/assets/
 background/publish-linux-x64/
 
+# Local tools
+comfy-studio/
+

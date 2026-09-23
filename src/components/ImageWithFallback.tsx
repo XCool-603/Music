@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { DEFAULT_COVER } from '../utils/imageUtils';
 
 interface ImageWithFallbackProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   fallbackSrc?: string;
 }
 
-export const ImageWithFallback: React.FC<ImageWithFallbackProps> = ({
+const ImageWithFallbackInner: React.FC<ImageWithFallbackProps> = ({
   src,
   alt = '',
   className = '',
@@ -17,7 +17,6 @@ export const ImageWithFallback: React.FC<ImageWithFallbackProps> = ({
   const [imgSrc, setImgSrc] = useState<string>(src || fallbackSrc);
   const [hasError, setHasError] = useState(false);
 
-  // Sync if src changes
   React.useEffect(() => {
     if (src) {
       setImgSrc(src);
@@ -27,15 +26,18 @@ export const ImageWithFallback: React.FC<ImageWithFallbackProps> = ({
     }
   }, [src, fallbackSrc]);
 
-  const handleError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
-    if (!hasError) {
-      setHasError(true);
-      setImgSrc(fallbackSrc);
-    }
-    if (onError) {
-      onError(e);
-    }
-  };
+  const handleError = useCallback(
+    (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
+      if (!hasError) {
+        setHasError(true);
+        setImgSrc(fallbackSrc);
+      }
+      if (onError) {
+        onError(e);
+      }
+    },
+    [hasError, fallbackSrc, onError]
+  );
 
   return (
     <img
@@ -49,3 +51,5 @@ export const ImageWithFallback: React.FC<ImageWithFallbackProps> = ({
     />
   );
 };
+
+export const ImageWithFallback = React.memo(ImageWithFallbackInner);

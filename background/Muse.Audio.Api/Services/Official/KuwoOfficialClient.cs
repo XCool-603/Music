@@ -755,7 +755,7 @@ internal static class V2Tracks
         };
 
     public static TrackInfo NetEase(string id, string title, string artist, string album, int duration, string coverUrl,
-        int? fee = null) =>
+        int? fee = null, string? mvId = null) =>
         new()
         {
             Id = $"ne_{id}",
@@ -770,6 +770,7 @@ internal static class V2Tracks
             SourceName = "网易云音乐",
             SourceKey = "wy",
             Fee = fee,
+            MvId = mvId,
             SourceRawInfo = new RawInfo
             {
                 Id = id, Songmid = id,

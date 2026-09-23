@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Track } from '../../types';
 import { TrackRow } from '../common/TrackRow';
 
@@ -20,10 +20,7 @@ interface TrackResultListProps {
   onDownload?: (track: Track) => void;
 }
 
-/**
- * 歌曲结果列表：TrackRow 集合 + 标题行（含数量与可选操作按钮）。
- */
-export const TrackResultList: React.FC<TrackResultListProps> = ({
+const TrackResultListInner: React.FC<TrackResultListProps> = ({
   tracks,
   title,
   titleIcon,
@@ -40,6 +37,9 @@ export const TrackResultList: React.FC<TrackResultListProps> = ({
   onAddToPlaylist,
   onDownload,
 }) => {
+  const favSet = useMemo(() => new Set(favorites), [favorites]);
+  const currentId = useMemo(() => currentTrack?.id ?? null, [currentTrack]);
+
   if (tracks.length === 0) return null;
 
   return (
@@ -61,9 +61,9 @@ export const TrackResultList: React.FC<TrackResultListProps> = ({
               track={track}
               index={startIndex + idx}
               showSourceBadge={showSourceBadge}
-              isCurrent={currentTrack?.id === track.id}
+              isCurrent={currentId === track.id}
               isPlaying={isPlaying}
-              isFavorite={favorites.includes(track.id)}
+              isFavorite={favSet.has(track.id)}
               onPlay={onPlayTrack}
               onToggleFavorite={onToggleFavorite}
               onAddToQueue={onAddToQueue}
@@ -76,3 +76,5 @@ export const TrackResultList: React.FC<TrackResultListProps> = ({
     </div>
   );
 };
+
+export const TrackResultList = React.memo(TrackResultListInner);

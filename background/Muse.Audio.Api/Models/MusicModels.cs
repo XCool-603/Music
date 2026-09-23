@@ -29,6 +29,9 @@ public class TrackInfo
     /// <summary>NetEase 版权档位：0 免费 / 1 VIP / 8 数字专辑（用于取链接前预判，见洛雪网易云分析）。</summary>
     public int? Fee { get; set; }
 
+    /// <summary>NetEase 歌曲关联的 MV id（weapi 搜索/歌曲详情返回 mvid 时透传，用于“看 MV”入口）。</summary>
+    public string? MvId { get; set; }
+
     /// <summary>Kuwo pay 位掩码：与 0x030003 相与为 0 才可经 Web 通道播放（见酷我 API 调用机制分析）。</summary>
     public long? Pay { get; set; }
 

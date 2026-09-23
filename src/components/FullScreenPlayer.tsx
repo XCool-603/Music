@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Track, PlaybackMode, VisualizerMode, StreamQuality } from '../types';
 import { LyricsView } from './LyricsView';
 import { VisualizerCanvas } from './VisualizerCanvas';
@@ -27,6 +27,7 @@ import {
   Radio,
   Download,
   Music,
+  Clapperboard,
 } from 'lucide-react';
 
 interface FullScreenPlayerProps {
@@ -55,9 +56,10 @@ interface FullScreenPlayerProps {
   onOpenQueue: () => void;
   onOpenSleepTimer: () => void;
   onOpenDownload?: (track: Track) => void;
+  onOpenMv?: (track: Track) => void;
 }
 
-export const FullScreenPlayer: React.FC<FullScreenPlayerProps> = ({
+const FullScreenPlayerInner: React.FC<FullScreenPlayerProps> = ({
   isOpen,
   onClose,
   track,
@@ -79,39 +81,52 @@ export const FullScreenPlayer: React.FC<FullScreenPlayerProps> = ({
   onOpenQueue,
   onOpenSleepTimer,
   onOpenDownload,
+  onOpenMv,
 }) => {
-  // Playback time is subscribed via the module-singleton timeStore (capped at
-  // 10fps) instead of a prop, so the whole app tree doesn't re-render per tick.
   const currentTime = useAudioTime();
   const [activeTab, setActiveTab] = useState<'vinyl' | 'lyrics' | 'visualizer'>('vinyl');
   const [visualizerMode, setVisualizerMode] = useState<VisualizerMode>('bars');
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubValue, setScrubValue] = useState(0);
+  const scrubInputRef = useRef<HTMLInputElement>(null);
+
+  // Fix: listen for mouseup/touchend on document so scrubbing always resets,
+  // even if the user releases outside the slider element.
+  useEffect(() => {
+    if (!isScrubbing) return;
+    const handleGlobalUp = () => {
+      setIsScrubbing(false);
+      if (scrubInputRef.current) {
+        onSeek(parseFloat(scrubInputRef.current.value));
+      }
+    };
+    document.addEventListener('mouseup', handleGlobalUp);
+    document.addEventListener('touchend', handleGlobalUp);
+    return () => {
+      document.removeEventListener('mouseup', handleGlobalUp);
+      document.removeEventListener('touchend', handleGlobalUp);
+    };
+  }, [isScrubbing, onSeek]);
+
+  const speedOptions = useMemo(() => [0.75, 1.0, 1.25, 1.5, 2.0], []);
+
+  const handleFavoriteClick = useCallback(() => {
+    if (!isFavorite) {
+      confetti({ particleCount: 50, spread: 60, origin: { y: 0.8 }, colors: ['#ec4899', '#f43f5e', '#a855f7'] });
+    }
+    onToggleFavorite(track!);
+  }, [isFavorite, onToggleFavorite, track]);
 
   if (!isOpen || !track) return null;
 
   const currentDisplayTime = isScrubbing ? scrubValue : currentTime;
   const progressPercent = duration > 0 ? (currentDisplayTime / duration) * 100 : 0;
 
-  const handleFavoriteClick = () => {
-    if (!isFavorite) {
-      confetti({
-        particleCount: 50,
-        spread: 60,
-        origin: { y: 0.8 },
-        colors: ['#ec4899', '#f43f5e', '#a855f7'],
-      });
-    }
-    onToggleFavorite(track);
-  };
-
-  const speedOptions = [0.75, 1.0, 1.25, 1.5, 2.0];
-
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[#08080c] text-slate-100 animate-in slide-in-from-bottom-5 duration-300 overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-      {/* Background Dynamic Ambient Blur */}
+      {/* Background Dynamic Ambient Blur - reduced blur radius for GPU perf */}
       <div
-        className="absolute inset-0 bg-cover bg-center blur-3xl opacity-30 scale-125 transition-all duration-1000 -z-10"
+        className="absolute inset-0 bg-cover bg-center blur-xl opacity-30 scale-125 transition-all duration-1000 -z-10"
         style={{ backgroundImage: `url(${normalizeCoverUrl(track.coverUrl)})` }}
       />
       <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/80 to-[#08080c] -z-10" />
@@ -158,6 +173,16 @@ export const FullScreenPlayer: React.FC<FullScreenPlayerProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {track?.mvid && onOpenMv && (
+            <button
+              onClick={() => onOpenMv(track)}
+              className="flex items-center gap-1.5 px-3 py-2 text-slate-200 hover:text-white rounded-full bg-white/5 hover:bg-white/15 transition text-xs font-medium"
+              title="观看 MV"
+            >
+              <Clapperboard className="w-4 h-4" />
+              <span className="hidden sm:inline">看MV</span>
+            </button>
+          )}
           <button
             onClick={onOpenSleepTimer}
             className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-white/10 transition"
@@ -340,6 +365,7 @@ export const FullScreenPlayer: React.FC<FullScreenPlayerProps> = ({
           <div className="space-y-1.5">
             <div className="relative group">
               <input
+                ref={scrubInputRef}
                 type="range"
                 min={0}
                 max={duration || 100}
@@ -348,14 +374,6 @@ export const FullScreenPlayer: React.FC<FullScreenPlayerProps> = ({
                 onMouseDown={() => { setScrubValue(currentTime); setIsScrubbing(true); }}
                 onTouchStart={() => { setScrubValue(currentTime); setIsScrubbing(true); }}
                 onChange={(e) => setScrubValue(parseFloat(e.target.value))}
-                onMouseUp={(e) => {
-                  setIsScrubbing(false);
-                  onSeek(parseFloat((e.target as HTMLInputElement).value));
-                }}
-                onTouchEnd={(e) => {
-                  setIsScrubbing(false);
-                  onSeek(parseFloat((e.target as HTMLInputElement).value));
-                }}
                 className="w-full cursor-pointer h-1.5"
                 style={{ ['--slider-fill' as string]: `${progressPercent}%` }}
               />
@@ -426,3 +444,5 @@ export const FullScreenPlayer: React.FC<FullScreenPlayerProps> = ({
     </div>
   );
 };
+
+export const FullScreenPlayer = React.memo(FullScreenPlayerInner);

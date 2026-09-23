@@ -138,6 +138,9 @@ public class NativeAudioPlugin: Plugin {
 
     do {
       let args = try invoke.parseArgs(Args.self)
+      if args.playing {
+        activateSession()
+      }
       updateNowPlaying(
         title: args.title,
         artist: args.artist,

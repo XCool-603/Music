@@ -29,6 +29,8 @@ struct Index {
         .domStorageAccess(true)
         .fileAccess(true)
         .onlineImageAccess(true)
+        .mediaPlayGestureAccess(false)
+        .audioSilent(false)
         .onErrorReceive((event: ErrorReceiveEvent) => {
           hilog.error(DOMAIN, TAG, 'Web onErrorReceive: %{public}s',
             event.error ? event.error.getErrorInfo() : JSON.stringify(event));

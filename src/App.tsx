@@ -10,7 +10,7 @@ import {
   CustomSourceScript,
 } from './types';
 import { audioEngine } from './utils/audioEngine';
-import { setPlaybackState, initNativePlayback, isNativePlayback } from './utils/nativeAudio';
+import { setPlaybackState, initNativePlayback, isNativePlayback, setKeepAlive } from './utils/nativeAudio';
 import { getNativeSnapshot } from './utils/nativeAudio';
 import { apiUrl } from './utils/apiBase';
 import { applyV2Quality, v2Lyric, v2Search } from './utils/apiV2';
@@ -26,6 +26,8 @@ import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { DiscoverView } from './components/DiscoverView';
 import { SearchView } from './components/SearchView';
+import { MvView } from './components/MvView';
+import { MvPlayer } from './components/MvPlayer';
 import { PlaylistDetailView } from './components/PlaylistDetailView';
 import { LibraryView } from './components/LibraryView';
 import { LocalFileImporter } from './components/LocalFileImporter';
@@ -45,6 +47,7 @@ import { downloadBatchTracks } from './utils/downloadManager';
 const TAB_TO_PATH: Record<string, string> = {
   discover: '/',
   search: '/search',
+  mv: '/mv',
   sources: '/sources',
   'playlist-detail': '/playlist',
   library: '/library',
@@ -56,6 +59,7 @@ const TAB_TO_PATH: Record<string, string> = {
 const PATH_TO_TAB: Record<string, string> = {
   '/': 'discover',
   '/search': 'search',
+  '/mv': 'mv',
   '/sources': 'sources',
   '/playlist': 'playlist-detail',
   '/library': 'library',
@@ -85,6 +89,55 @@ function PlaylistDetailRoute(
     );
   }
   return <PlaylistDetailView {...viewProps} playlist={playlist} />;
+}
+
+async function resolveDirectAudioUrl(track: Track, quality: StreamQuality): Promise<string> {
+  const rawUrl = track.audioUrl || '';
+  if (!rawUrl.trim()) return '';
+
+  // 1. If it's a v2 URL (/api/v2/song/url)
+  if (rawUrl.includes('/api/v2/song/url')) {
+    const v2Url = applyV2Quality(rawUrl, quality);
+    try {
+      const sep = v2Url.includes('?') ? '&' : '?';
+      const res = await fetch(apiUrl(`${v2Url}${sep}format=json`), { signal: AbortSignal.timeout(4000) });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.url) return data.url;
+      }
+    } catch {
+      // ignore
+    }
+    // Fallback: direct 302 redirect URL (never /api/proxy/audio)
+    return apiUrl(v2Url);
+  }
+
+  // 2. If it's a v1 stream URL (/api/music/stream)
+  if (rawUrl.includes('/api/music/stream')) {
+    try {
+      const source = track.sourceKey || (track.id.startsWith('ne_') ? 'netease' : 'kuwo');
+      const songId =
+        track.sourceRawInfo?.id ||
+        track.sourceRawInfo?.songmid ||
+        track.id.replace(/^(kw_|ne_|tx_)/, '');
+      const res = await fetch(
+        apiUrl(`/api/music/stream-url?source=${source}&id=${encodeURIComponent(songId)}&rid=${encodeURIComponent(songId)}&level=${quality}`),
+        { signal: AbortSignal.timeout(4000) }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.url) return data.url;
+      }
+    } catch {
+      // ignore
+    }
+    // Fallback: direct stream with quality param
+    return rawUrl.replace(/(level=)[^&]*/, `$1${quality}`) +
+      (rawUrl.includes('level=') ? '' : `&level=${quality}`);
+  }
+
+  // 3. Otherwise it's already a direct CDN link or local/data URL
+  return rawUrl;
 }
 
 export default function App() {
@@ -151,7 +204,10 @@ export default function App() {
     return saved ? JSON.parse(saved) : ['kw_118980', 'kw_228908'];
   });
 
-  const [recentHistory, setRecentHistory] = useState<string[]>(['kw_118980', 'kw_93157']);
+  const [recentHistory, setRecentHistory] = useState<string[]>(() => {
+    const saved = localStorage.getItem('wavesound_recent_history');
+    return saved ? (() => { try { return JSON.parse(saved); } catch { return []; } })() : [];
+  });
 
   // --- Custom Source Scripts (LX Music Compatible) ---
   const [customScripts, setCustomScripts] = useState<CustomSourceScript[]>(() => {
@@ -298,6 +354,7 @@ export default function App() {
   const [trackToAddToPlaylist, setTrackToAddToPlaylist] = useState<Track | null>(null);
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
   const [trackToDownload, setTrackToDownload] = useState<Track | null>(null);
+  const [mvToPlay, setMvToPlay] = useState<{ id: string; title: string; artist?: string } | null>(null);
 
   const handleOpenDownload = useCallback((track: Track) => {
     setTrackToDownload(track);
@@ -312,6 +369,11 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('wavesound_favorites', JSON.stringify(favorites));
   }, [favorites]);
+
+  // Save recent history to localStorage
+  useEffect(() => {
+    localStorage.setItem('wavesound_recent_history', JSON.stringify(recentHistory));
+  }, [recentHistory]);
 
   // Latest-state refs so the audio element's onended handler (bound at loadTrack time)
   // always executes up-to-date loop mode / queue / current track logic.
@@ -379,16 +441,19 @@ export default function App() {
     async (track: Track) => {
       let resolvedTrack = track;
 
-      // 1. If track is specifically bound to a custom user script
+      // 1. If track is specifically bound to a custom user script —
+      //    use getCached() to skip re-compilation of the script source code.
       const specificScript = track.sourceScriptId ? customScripts.find((s) => s.id === track.sourceScriptId) : null;
 
       if (specificScript && specificScript.enabled) {
         try {
-          const runner = new SourceScriptRunner(specificScript);
-          const initRes = await runner.init();
-          if (initRes.success) {
-            const url = await runner.resolveAudioUrl(track);
-            const lyric = await runner.resolveLyric(track);
+          const runner = await SourceScriptRunner.getCached(specificScript);
+          if (runner) {
+            // Resolve audio URL and lyrics IN PARALLEL (was serial before).
+            const [url, lyric] = await Promise.all([
+              runner.resolveAudioUrl(track),
+              runner.resolveLyric(track),
+            ]);
             if (typeof url === 'string' && url.trim() && !url.includes('itunes.apple.com')) {
               resolvedTrack = {
                 ...track,
@@ -404,28 +469,8 @@ export default function App() {
         }
       }
 
-      // 2. If track needs full real dynamic synchronized LRC
-      if (
-        resolvedTrack.sourceRawInfo?.id &&
-        (!resolvedTrack.lyrics || resolvedTrack.lyrics.includes('正在同步声学动态频谱') || resolvedTrack.lyrics.length < 50)
-      ) {
-        try {
-          const songId = resolvedTrack.sourceRawInfo.id;
-          // v2 client handles both API versions internally (v1 rollback-safe)
-          // and returns { lrc, translation }.
-          const lrcData = await v2Lyric(resolvedTrack.sourceKey || 'kw', songId);
-          if (lrcData.lrc) {
-            resolvedTrack.lyrics = lrcData.lrc;
-            // Store translation info in the lyrics string (appended as metadata)
-            if (lrcData.translation) {
-              resolvedTrack.lyrics = lrcData.lrc + '\n---tlyric---\n' + lrcData.translation;
-            }
-          }
-        } catch (lrcErr) {
-          console.log('Fetch lrc error:', lrcErr);
-        }
-      }
-
+      // Start playback ASAP — set track state and begin loading audio.
+      // Lyrics are fetched in the background and patched in when ready.
       setCurrentTrack(resolvedTrack);
       timeStore.reset(resolvedTrack.duration);
       lastDurationRef.current = resolvedTrack.duration;
@@ -440,47 +485,21 @@ export default function App() {
       // Add to history
       setRecentHistory((prev) => [resolvedTrack.id, ...prev.filter((id) => id !== resolvedTrack.id)].slice(0, 30));
 
-      // Apply user-selected stream quality tier to API-backed audio URLs.
-      // All playback routes through our own origin (direct CDN links get
-      // wrapped by audioEngine.normalizeAudioUrl into /api/proxy/audio, which
-      // sends ACAO:* — so the WebAudio DSP graph always receives real samples
-      // and no media request is ever rejected by CORS).
+      // Apply user-selected stream quality tier and resolve direct CDN URL (zero server bandwidth).
       const q = audioSettingsRef.current.quality || 'high';
-      let finalAudioUrl = resolvedTrack.audioUrl;
+      let finalAudioUrl = await resolveDirectAudioUrl(resolvedTrack, q);
 
-      if (resolvedTrack.audioUrl.includes('/api/v2/song/url')) {
-        // v2 official-channel link: quality is encoded in the URL. Play it
-        // through our own audio proxy instead of feeding the dynamic 302
-        // endpoint to the media element directly: the proxy is same-origin
-        // (no CORS failures), returns ACAO:* for the WebAudio DSP graph, and
-        // passes Range requests straight through — so seeking streams a 206
-        // from the cached CDN URL instead of re-following the 302 chain on
-        // every scrub, which used to error out and reload the track from 0.
-        const v2Url = applyV2Quality(resolvedTrack.audioUrl, q);
-        finalAudioUrl = apiUrl(`/api/proxy/audio?url=${encodeURIComponent(v2Url)}`);
-      } else if (resolvedTrack.audioUrl.includes('/api/music/stream')) {
-        // v1 proxied stream: just rewrite the quality tier.
-        finalAudioUrl =
-          resolvedTrack.audioUrl.replace(/(level=)[^&]*/, `$1${q}`) +
-          (resolvedTrack.audioUrl.includes('level=') ? '' : `&level=${q}`);
-      }
-
-      // Script-sourced rows (aggregator puts them first) can carry an empty
-      // audioUrl when the script's musicUrl resolution failed — feeding ''
-      // to loadTrack is a silent no-op (no request, no error). Fall back to
-      // a live official search by title+artist and play the first hit so the
-      // user always gets sound.
+      // Script-sourced rows can carry an empty audioUrl — fall back to official search.
       if (!finalAudioUrl || !finalAudioUrl.trim()) {
         try {
           const fallbackQuery = `${resolvedTrack.title} ${resolvedTrack.artist}`.trim();
           const hits = await v2Search(fallbackQuery, 1, 1, 'all');
           const hit = hits.find((t) => t.audioUrl && t.audioUrl.includes('/api/v2/song/url'));
           if (hit) {
-            const v2Url = applyV2Quality(hit.audioUrl, q);
-            finalAudioUrl = apiUrl(`/api/proxy/audio?url=${encodeURIComponent(v2Url)}`);
+            finalAudioUrl = await resolveDirectAudioUrl(hit, q);
             resolvedTrack = {
               ...resolvedTrack,
-              audioUrl: v2Url,
+              audioUrl: finalAudioUrl,
               sourceName: hit.sourceName || resolvedTrack.sourceName,
               sourceKey: hit.sourceKey || resolvedTrack.sourceKey,
             };
@@ -491,14 +510,8 @@ export default function App() {
       }
 
       audioEngine.setPlaybackRate(playbackSpeed);
-      // Re-arm native (AVPlayer) playback for this track. A previous track may
-      // have been downgraded to HTML5 after errors; HTML5 cannot play in the
-      // background, so every new track gets another chance at native. No-op on
-      // platforms where native playback is unavailable.
       audioEngine.setNativeMode(true);
       nativeProxyRetryRef.current = false;
-      // Wait for loadTrack to finish setting the source (native or HTML5)
-      // before starting playback, avoiding a play-before-source race.
       await audioEngine.loadTrack(
         finalAudioUrl,
         handleTrackEnded,
@@ -512,6 +525,32 @@ export default function App() {
       );
       audioEngine.play();
       setIsPlaying(true);
+
+      // 2. Fetch real LRC lyrics in the BACKGROUND — don't block playback.
+      //    The user hears audio immediately while lyrics load asynchronously.
+      if (
+        resolvedTrack.sourceRawInfo?.id &&
+        (!resolvedTrack.lyrics || resolvedTrack.lyrics.includes('正在同步声学动态频谱') || resolvedTrack.lyrics.length < 50)
+      ) {
+        (async () => {
+          try {
+            const songId = resolvedTrack.sourceRawInfo.id;
+            const lrcData = await v2Lyric(resolvedTrack.sourceKey || 'kw', songId);
+            if (lrcData.lrc) {
+              let fullLyrics = lrcData.lrc;
+              if (lrcData.translation) {
+                fullLyrics = lrcData.lrc + '\n---tlyric---\n' + lrcData.translation;
+              }
+              // Only update if this track is still the current one.
+              setCurrentTrack((prev) =>
+                prev && prev.id === resolvedTrack.id ? { ...prev, lyrics: fullLyrics } : prev
+              );
+            }
+          } catch {
+            /* lyrics fetch failure is non-critical */
+          }
+        })();
+      }
     },
     [handleTrackEnded, playbackSpeed, customScripts, audioSettings.quality]
   );
@@ -558,17 +597,11 @@ export default function App() {
   // Keep-alive → native: keep the WebView process awake so playback continues
   // with the screen off (Android foreground media service + partial wake lock).
   useEffect(() => {
-    try {
-      const tauri = (window as any).__TAURI_INTERNALS__;
-      if (!tauri?.invoke) return;
-      tauri.invoke('set_keep_alive', {
-        playing: isPlaying,
-        title: currentTrack?.title ?? 'MUSE.AUDIO',
-        artist: currentTrack?.artist ?? '',
-      }).catch(() => {});
-    } catch {
-      // ignore
-    }
+    setKeepAlive(
+      isPlaying,
+      currentTrack?.title ?? 'MUSE.AUDIO',
+      currentTrack?.artist ?? ''
+    ).catch(() => {});
   }, [isPlaying, currentTrack]);
 
   // Native background-audio bridge (iOS): activate AVAudioSession playback,
@@ -914,7 +947,11 @@ export default function App() {
 
   const handleShuffleAll = (trackList: Track[]) => {
     if (trackList.length === 0) return;
-    const shuffled = [...trackList].sort(() => Math.random() - 0.5);
+    const shuffled = [...trackList];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
     setQueue(shuffled);
     setPlaybackMode('shuffle');
     handlePlayTrack(shuffled[0]);
@@ -1157,6 +1194,11 @@ export default function App() {
               />
 
               <Route
+                path="/mv"
+                element={<MvView initialQuery={''} />}
+              />
+
+              <Route
                 path="/sources"
                 element={
                   <SourceScriptManagerView
@@ -1341,6 +1383,11 @@ export default function App() {
         onOpenQueue={() => setIsQueueDrawerOpen(true)}
         onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
         onOpenDownload={handleOpenDownload}
+        onOpenMv={(track) => {
+          if (track.mvid) {
+            setMvToPlay({ id: track.mvid, title: track.title, artist: track.artist });
+          }
+        }}
       />
 
       {/* 10-Band EQ Modal */}
@@ -1395,6 +1442,15 @@ export default function App() {
         customScripts={customScripts}
         quality={audioSettings.quality}
         onOpenLocalImporter={() => navigate('/local')}
+      />
+
+      {/* MV Player (global overlay for song-associated MV) */}
+      <MvPlayer
+        isOpen={Boolean(mvToPlay)}
+        onClose={() => setMvToPlay(null)}
+        mvId={mvToPlay?.id || ''}
+        title={mvToPlay?.title || ''}
+        artist={mvToPlay?.artist}
       />
 
       {/* Floating Download Toast / Queue Notification */}

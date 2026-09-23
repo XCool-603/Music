@@ -31,12 +31,25 @@
               "action.system.home"
             ]
           }
+        ],
+        "backgroundModes": [
+          "audioPlayback"
         ]
       }
     ],
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET"
+      },
+      {
+        "name": "ohos.permission.KEEP_BACKGROUND_RUNNING",
+        "reason": "$string:keep_background_running_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "always"
+        }
       }
     ]
   }

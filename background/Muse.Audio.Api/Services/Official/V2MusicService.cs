@@ -429,6 +429,29 @@ public class V2MusicService
         return lrc;
     }
 
+    // ── MV (NetEase official channel) ─────────────────────────────
+    public async Task<(List<MvInfo> Mvs, int Total)> MvSearchAsync(string q, int page, int limit)
+    {
+        var key = $"v2:mvsearch:{q}:{page}:{limit}";
+        if (_cache.TryGetValue(key, out (List<MvInfo> Mvs, int Total) hit))
+            return hit;
+        var result = await _netease.MvSearchAsync(q, page, limit);
+        if (result.Mvs.Count > 0)
+            _cache.Set(key, result, SearchTtl);
+        return result;
+    }
+
+    public async Task<(string? Url, List<int> Resolutions)> MvUrlAsync(string id, int resolution)
+    {
+        var key = $"v2:mvurl:{id}";
+        if (_cache.TryGetValue(key, out (string? Url, List<int> Resolutions) hit) && !string.IsNullOrEmpty(hit.Url))
+            return hit;
+        var result = await _netease.MvUrlAsync(id, resolution);
+        if (!string.IsNullOrEmpty(result.Url))
+            _cache.Set(key, result, UrlTtl);
+        return result;
+    }
+
     // ── Cover ────────────────────────────────────────────────────
     public async Task<string?> CoverUrlAsync(string source, string id)
     {

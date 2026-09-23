@@ -14,6 +14,7 @@ import {
   Sparkles,
   Headphones,
   FileCode,
+  Clapperboard,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -48,6 +49,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const mainNavItems: { id: ActiveTab; label: string; icon: React.ReactNode; badge?: number | string }[] = [
     { id: 'discover', label: '发现音乐', icon: <Compass className="w-4 h-4" /> },
     { id: 'search', label: '搜索中心', icon: <Search className="w-4 h-4" /> },
+    { id: 'mv', label: 'MV 音乐视频', icon: <Clapperboard className="w-4 h-4" /> },
     { id: 'sources', label: '音源扩展 (JS)', icon: <FileCode className="w-4 h-4" /> },
     { id: 'library', label: '我的音乐库', icon: <Library className="w-4 h-4" /> },
     { id: 'favorites', label: '我喜欢的音乐', icon: <Heart className="w-4 h-4" />, badge: favoritesCount },

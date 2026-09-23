@@ -51,6 +51,7 @@ export function mapBackendTrack(item: any, sourceScriptId?: string): Track {
     sourceScriptId,
     sourceName: primarySourceName(sourceKey, item.sourceName),
     sourceKey,
+    mvid: item.mvId || item.mvid || undefined,
     sourceRawInfo: {
       id: item.rid || item.id,
       songmid: item.rid || item.id,
@@ -68,7 +69,7 @@ export function applyV2Quality(audioUrl: string, quality: StreamQuality): string
   if (!audioUrl.includes('/api/v2/song/url')) return audioUrl;
   return audioUrl.includes('quality=')
     ? audioUrl.replace(/(quality=)[^&]*/, `$1${quality}`)
-    : `${audioUrl}&quality=${quality}`;
+    : `${audioUrl}${audioUrl.includes('?') ? '&' : '?'}quality=${quality}`;
 }
 
 async function fetchJson(url: string, timeoutMs = 15000): Promise<any | null> {
@@ -100,15 +101,18 @@ export async function v2Search(
   const query = (q || '').trim();
   if (!query) return [];
 
+  // Try v2 first if enabled
   if (API_V2) {
     const data = await fetchJson(
       apiUrl(`/api/v2/search?q=${encodeURIComponent(query)}&page=${page}&limit=${limit}&source=${source}`)
     );
-    if (data && Array.isArray(data.tracks)) return data.tracks.map((t: any) => mapBackendTrack(t));
-    return [];
+    if (data && Array.isArray(data.tracks) && data.tracks.length > 0) {
+      return data.tracks.map((t: any) => mapBackendTrack(t));
+    }
+    // v2 returned empty or failed — fall through to v1 automatically
   }
 
-  // v1 rollback path
+  // v1 path (explicit rollback OR automatic fallback from v2)
   const data = await fetchJson(
     apiUrl(`/api/music/search?q=${encodeURIComponent(query)}&page=${page}&limit=${limit}&source=${source}`)
   );
@@ -132,13 +136,13 @@ export async function v2SearchRaw(
     const data = await fetchJson(
       apiUrl(`/api/v2/search?q=${encodeURIComponent(query)}&page=${page}&limit=${limit}&source=${source}`)
     );
-    if (data && Array.isArray(data.tracks)) {
+    if (data && Array.isArray(data.tracks) && data.tracks.length > 0) {
       return {
         tracks: data.tracks.map((t: any) => mapBackendTrack(t)),
         total: typeof data.total === 'number' ? data.total : null,
       };
     }
-    return { tracks: [], total: null };
+    // v2 empty/failed → fall through to v1
   }
 
   const data = await fetchJson(
@@ -187,8 +191,10 @@ export async function v2Toplist(
     const data = await fetchJson(
       apiUrl(`/api/v2/toplist?source=${source}&category=${category}&limit=${limit}`)
     );
-    if (data && Array.isArray(data.tracks)) return data.tracks.map((t: any) => mapBackendTrack(t));
-    return [];
+    if (data && Array.isArray(data.tracks) && data.tracks.length > 0) {
+      return data.tracks.map((t: any) => mapBackendTrack(t));
+    }
+    // v2 empty/failed → fall through to v1 discovery
   }
 
   // v1 rollback path: discovery trending as a toplist stand-in.
@@ -227,6 +233,62 @@ export async function v2Lyric(
     return { lrc: v1.lrc, translation: typeof v1.tlyric === 'string' ? v1.tlyric : '' };
   }
   return { lrc: '', translation: '' };
+}
+
+// ── MV (music videos) ───────────────────────────────────────────────
+
+export interface MvItem {
+  id: string;
+  name: string;
+  artist: string;
+  cover: string;
+  durationMs: number;
+  playCount?: number;
+}
+
+export interface MvSearchResult {
+  mvs: MvItem[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+/** Search official music videos. Returns parsed MVs (NetEase official). */
+export async function v2MvSearch(q: string, page = 1, limit = 24): Promise<MvSearchResult> {
+  const query = (q || '').trim();
+  if (!query) return { mvs: [], total: 0, page, limit };
+  const data = await fetchJson(
+    apiUrl(`/api/v2/mv/search?q=${encodeURIComponent(query)}&page=${page}&limit=${limit}`)
+  );
+  if (data && Array.isArray(data.mvs)) {
+    return {
+      mvs: (data.mvs as any[]).map((m) => ({
+        id: String(m.id ?? ''),
+        name: m.name || '',
+        artist: m.artist || '',
+        cover: normalizeCoverUrl(m.cover),
+        durationMs: m.durationMs || 0,
+        playCount: typeof m.playCount === 'number' ? m.playCount : undefined,
+      })),
+      total: typeof data.total === 'number' ? data.total : 0,
+      page: typeof data.page === 'number' ? data.page : page,
+      limit: typeof data.limit === 'number' ? data.limit : limit,
+    };
+  }
+  return { mvs: [], total: 0, page, limit };
+}
+
+/** Resolve an mp4 play URL for an MV. `r` is the desired resolution. */
+export async function v2MvUrl(id: string, r = 720): Promise<{ url: string; resolutions: number[] }> {
+  if (!id) return { url: '', resolutions: [] };
+  const data = await fetchJson(apiUrl(`/api/v2/mv/url?id=${encodeURIComponent(id)}&r=${r}`), 30000);
+  if (data && typeof data.url === 'string' && data.url.length > 0) {
+    return {
+      url: data.url,
+      resolutions: Array.isArray(data.resolutions) ? data.resolutions.map(Number) : [],
+    };
+  }
+  return { url: '', resolutions: [] };
 }
 
 // ── Dev helpers ─────────────────────────────────────────────────────

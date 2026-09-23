@@ -26,6 +26,9 @@ on:
           - 'universal'   # 全 ABI(默认)
           - 'apk'         # 同 universal,生成各架构 APK
         default: 'universal'
+  push:
+    branches:
+      - main
 
 jobs:
   build-android:

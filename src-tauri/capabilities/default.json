@@ -5,9 +5,23 @@
   "windows": [
     "main"
   ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*"
+    ]
+  },
   "permissions": [
     "core:default",
     "shell:allow-open",
-    "clipboard-manager:allow-write-text"
+    "clipboard-manager:allow-write-text",
+    "allow-set-keep-alive",
+    "allow-set-playback-state",
+    "allow-native-playback-available",
+    "allow-native-set-source",
+    "allow-native-play",
+    "allow-native-pause",
+    "allow-native-seek",
+    "allow-native-set-rate",
+    "allow-native-register-sink"
   ]
 }

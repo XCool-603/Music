@@ -27,23 +27,14 @@ export default defineConfig(({ command }) => {
       port: 3000,
       strictPort: false,
       hmr: process.env.DISABLE_HMR !== 'true',
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      watch: process.env.DISABLE_HMR === 'true' ? null : {
+        ignored: ['**/src-tauri/**', '**/harmonyos/**', '**/builds/**', '**/dist/**', '**/dist-tauri/**', '**/api-publish2/**'],
+      },
       proxy: {
         '/api': {
-          // Local dev proxies to the local backend; override with API_PROXY_TARGET
-          // (e.g. http://dxcool.cn:3001) to point at a remote deployment.
-          target: process.env.API_PROXY_TARGET || 'http://localhost:3001',
+          target: process.env.API_PROXY_TARGET || 'http://127.0.0.1:3001',
           changeOrigin: true,
           timeout: 30000,
-          configure: (proxy) => {
-            proxy.on('error', (err, _req, res) => {
-              console.error('[Proxy Error]', err.message);
-              if (!res.headersSent) {
-                res.writeHead(502, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Proxy error', message: err.message }));
-              }
-            });
-          },
         },
       },
     },
