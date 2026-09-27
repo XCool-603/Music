@@ -111,6 +111,7 @@ public class ProxyService
             ctx.Response.ContentType = upstream.Content.Headers.ContentType?.MediaType ?? "audio/mpeg";
             ctx.Response.Headers["Accept-Ranges"] = "bytes";
             ctx.Response.Headers["Access-Control-Allow-Origin"] = "*";
+            ctx.Response.Headers["Access-Control-Expose-Headers"] = "Content-Range, Content-Length, Accept-Ranges";
             // Audio streams must NOT be disk-cached: a truncated cached 200
             // entry mixed with seek-time 206 responses makes Chromium abort
             // with ERR_CONTENT_LENGTH_MISMATCH and reload the track from 0.
