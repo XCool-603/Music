@@ -1,0 +1,12 @@
+node_modules
+.git
+.agents
+.vscode
+.idea
+builds
+dist
+dist-tauri
+src-tauri
+android
+coverage
+*.log

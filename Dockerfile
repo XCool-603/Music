@@ -1,23 +1,28 @@
-FROM circleci/android:2024.01.1-node
+# ==========================================
+# MUSE.AUDIO - Production Dockerfile (.NET 8 + Static Web)
+# ==========================================
 
+# Stage 1: Build .NET 8 Backend
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+# Copy project files and build
+COPY background/Muse.Audio.Api/ ./background/Muse.Audio.Api/
+WORKDIR /src/background/Muse.Audio.Api
+RUN dotnet publish Muse.Audio.Api.csproj -c Release -o /app/publish
+
+# Stage 2: ASP.NET Core 8 Runtime
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
-RUN npm ci --ignore-scripts
+# Copy published application (includes wwwroot frontend static assets)
+COPY --from=build /app/publish .
 
-COPY vite.config.ts tsconfig.json ./
-COPY index.html ./
-COPY public/ public/
-COPY src/ src/
+# Environment configuration
+ENV PORT=3001
+ENV ASPNETCORE_URLS=http://0.0.0.0:3001
+ENV ASPNETCORE_ENVIRONMENT=Production
 
-ENV BUILD_TARGET=capacitor
-RUN npm run build:frontend
+EXPOSE 3001
 
-RUN npx cap sync android
-
-RUN cd android && ./gradlew assembleDebug
-
-RUN mkdir -p /output && \
-    cp android/app/build/outputs/apk/debug/app-debug.apk /output/muse-audio.apk
-
-CMD ["cp", "-r", "/output/.", "/output-volume/"]
+ENTRYPOINT ["dotnet", "Muse.Audio.Api.dll"]
