@@ -48,6 +48,9 @@ const SourceScriptManagerView = lazy(() => import('./components/SourceScriptMana
 const EqualizerModal = lazy(() => import('./components/EqualizerModal'));
 const DownloadModal = lazy(() => import('./components/DownloadModal'));
 const ImportPlaylistModal = lazy(() => import('./components/ImportPlaylistModal'));
+import { LegalModal } from './components/LegalModal';
+import { UpdateModal } from './components/UpdateModal';
+import { checkForUpdates, type UpdateInfo } from './utils/updater';
 
 const TAB_TO_PATH: Record<string, string> = {
   discover: '/',
@@ -361,6 +364,61 @@ export default function App() {
   const [trackToDownload, setTrackToDownload] = useState<Track | null>(null);
   const [mvToPlay, setMvToPlay] = useState<{ id: string; title: string; artist?: string } | null>(null);
   const [isImportPlaylistOpen, setIsImportPlaylistOpen] = useState(false);
+
+  // Legal & Auto Updater states
+  const [isLegalModalOpen, setIsLegalModalOpen] = useState(false);
+  const [isFirstLaunchLegal, setIsFirstLaunchLegal] = useState(false);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+
+  // Check first launch legal agreement
+  useEffect(() => {
+    try {
+      const agreed = localStorage.getItem('muse_legal_agreed');
+      if (!agreed) {
+        setIsFirstLaunchLegal(true);
+        setIsLegalModalOpen(true);
+      }
+    } catch {
+      // Ignore
+    }
+  }, []);
+
+  // Silent update check in background after initial render (delayed by 3.5s)
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        const info = await checkForUpdates(true);
+        if (info && info.hasUpdate) {
+          setUpdateInfo(info);
+          setIsUpdateModalOpen(true);
+        }
+      } catch (err) {
+        console.warn('Silent update check failed:', err);
+      }
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Manual update check handler
+  const handleCheckUpdateManual = useCallback(async () => {
+    setIsCheckingUpdate(true);
+    setIsUpdateModalOpen(true);
+    try {
+      const info = await checkForUpdates(false);
+      setUpdateInfo(info);
+    } catch (err) {
+      console.error('Manual update check failed:', err);
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  }, []);
+
+  const handleOpenLegal = useCallback(() => {
+    setIsFirstLaunchLegal(false);
+    setIsLegalModalOpen(true);
+  }, []);
 
   const handleImportPlaylistSuccess = useCallback((newPlaylist: Playlist, importedTracks: Track[]) => {
     setTracks((prev) => {
@@ -1183,6 +1241,8 @@ export default function App() {
             onOpenImportPlaylist={() => setIsImportPlaylistOpen(true)}
             onOpenEQ={() => setIsEQModalOpen(true)}
             onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
+            onOpenLegal={handleOpenLegal}
+            onCheckUpdate={handleCheckUpdateManual}
             favoritesCount={favorites.length}
             currentTrack={currentTrack}
             isPlaying={isPlaying}
@@ -1374,6 +1434,8 @@ export default function App() {
                     onNavigateLocalImport={() => navigate('/local')}
                     onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
                     onOpenImportPlaylist={() => setIsImportPlaylistOpen(true)}
+                    onOpenLegal={handleOpenLegal}
+                    onCheckUpdate={handleCheckUpdateManual}
                   />
                 }
               />
@@ -1544,6 +1606,22 @@ export default function App() {
           />
         )}
       </Suspense>
+
+      {/* Legal & Disclaimer Modal */}
+      <LegalModal
+        isOpen={isLegalModalOpen}
+        onClose={() => setIsLegalModalOpen(false)}
+        isFirstLaunch={isFirstLaunchLegal}
+        onAgree={() => setIsFirstLaunchLegal(false)}
+      />
+
+      {/* Cross-Platform Auto Update Modal */}
+      <UpdateModal
+        isOpen={isUpdateModalOpen}
+        onClose={() => setIsUpdateModalOpen(false)}
+        updateInfo={updateInfo}
+        isChecking={isCheckingUpdate}
+      />
 
       {/* Floating Download Toast / Queue Notification */}
       <DownloadToastNotification />

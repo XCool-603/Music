@@ -1,5 +1,5 @@
 import React from 'react';
-import { Heart, ListMusic, FileCode, Sliders, Upload, Moon, User, DownloadCloud } from 'lucide-react';
+import { Heart, ListMusic, FileCode, Sliders, Upload, Moon, User, DownloadCloud, Scale, ArrowUpCircle } from 'lucide-react';
 
 interface MyViewProps {
   favoritesCount: number;
@@ -12,6 +12,8 @@ interface MyViewProps {
   onNavigateLocalImport: () => void;
   onOpenSleepTimer: () => void;
   onOpenImportPlaylist?: () => void;
+  onOpenLegal?: () => void;
+  onCheckUpdate?: () => void;
 }
 
 export const MyView: React.FC<MyViewProps> = ({
@@ -25,6 +27,8 @@ export const MyView: React.FC<MyViewProps> = ({
   onNavigateLocalImport,
   onOpenSleepTimer,
   onOpenImportPlaylist,
+  onOpenLegal,
+  onCheckUpdate,
 }) => {
   const tools = [
     {
@@ -77,6 +81,28 @@ export const MyView: React.FC<MyViewProps> = ({
             desc: '网易云/QQ歌单',
             color: 'text-violet-400 bg-violet-500/15 border-violet-500/25',
             onClick: onOpenImportPlaylist,
+          },
+        ]
+      : []),
+    ...(onCheckUpdate
+      ? [
+          {
+            icon: <ArrowUpCircle className="w-6 h-6" />,
+            label: '检查更新',
+            desc: 'v1.0.0 最新版',
+            color: 'text-teal-400 bg-teal-500/15 border-teal-500/25',
+            onClick: onCheckUpdate,
+          },
+        ]
+      : []),
+    ...(onOpenLegal
+      ? [
+          {
+            icon: <Scale className="w-6 h-6" />,
+            label: '免责与法律',
+            desc: 'DMCA 与许可',
+            color: 'text-indigo-400 bg-indigo-500/15 border-indigo-500/25',
+            onClick: onOpenLegal,
           },
         ]
       : []),

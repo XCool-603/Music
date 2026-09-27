@@ -16,6 +16,8 @@ import {
   FileCode,
   Clapperboard,
   Download,
+  Scale,
+  ArrowUpCircle,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -28,6 +30,8 @@ interface SidebarProps {
   onOpenImportPlaylist?: () => void;
   onOpenEQ: () => void;
   onOpenSleepTimer: () => void;
+  onOpenLegal?: () => void;
+  onCheckUpdate?: () => void;
   favoritesCount: number;
   currentTrack: Track | null;
   isPlaying: boolean;
@@ -44,6 +48,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenImportPlaylist,
   onOpenEQ,
   onOpenSleepTimer,
+  onOpenLegal,
+  onCheckUpdate,
   favoritesCount,
   currentTrack,
   isPlaying,
@@ -136,6 +142,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Moon className="w-4 h-4 text-purple-400" />
               <span>睡眠倒计时</span>
             </button>
+          </div>
+        </div>
+
+        {/* System & Support Group */}
+        <div>
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 px-3 mb-2">
+            系统与支持
+          </div>
+          <div className="space-y-1">
+            {onCheckUpdate && (
+              <button
+                onClick={onCheckUpdate}
+                className="w-full flex items-center justify-between px-3.5 py-2 rounded-2xl text-sm text-slate-400 hover:bg-white/5 hover:text-slate-100 transition group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-1.5 h-1.5 rounded-full bg-transparent" />
+                  <ArrowUpCircle className="w-4 h-4 text-emerald-400 group-hover:animate-pulse" />
+                  <span>检查更新</span>
+                </div>
+                <span className="text-[10px] font-mono text-emerald-400/90 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                  v1.0.0
+                </span>
+              </button>
+            )}
+            {onOpenLegal && (
+              <button
+                onClick={onOpenLegal}
+                className="w-full flex items-center gap-3 px-3.5 py-2 rounded-2xl text-sm text-slate-400 hover:bg-white/5 hover:text-slate-100 transition"
+              >
+                <div className="w-1.5 h-1.5 rounded-full bg-transparent" />
+                <Scale className="w-4 h-4 text-indigo-400" />
+                <span>免责声明与版权</span>
+              </button>
+            )}
           </div>
         </div>
 
