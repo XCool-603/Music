@@ -197,51 +197,54 @@ muse-app/
 
 ---
 
-## 🐳 Docker 服务端一键部署
+## 🚀 部署与运行
 
-项目提供完整的生产级 Dockerfile 与 Docker Compose 编排，内嵌最新编译的前端静态 Web 页面与 .NET 8 API 后端，支持单命令一键部署与开箱即用。
+### 方式 A：本地开发与源码运行
 
-### 1. 终端一键运行 (Linux / VPS)
+**前置要求：** Node.js 18+
 
 ```bash
-# 1. 克隆代码仓库并进入目录
+# 1. 安装依赖
+npm install
+
+# 2. 启动开发服务器
+npm run dev
+```
+
+开发服务器默认运行在 `http://localhost:3000`，API 请求自动代理到后端服务。
+
+---
+
+### 方式 B：Docker 一键部署（推荐服务器 / NAS / Linux 使用）
+
+项目内嵌完整的 Docker 支持，零配置快速构建部署：
+
+```bash
+# 1. 克隆代码仓库
 git clone https://github.com/XCool-603/Music.git
 cd Music
 
-# 2. 赋予脚本执行权限并一键启动
-chmod +x docker-deploy.sh
-./docker-deploy.sh
-
-# 或者使用原生 Docker Compose
+# 2. 一键构建并后台启动
 docker compose up -d --build
 ```
 
-启动完成后：
+启动完成后即可在浏览器访问：
 * 前端网页播放器：`http://服务器IP:3001/music/`
 * 后端 API 接口检查：`http://服务器IP:3001/api/music/banner`
 
-### 2. 1Panel 面板一键部署
+#### 更新到最新版本（无缝平滑升级，保留已有配置与数据）：
 
-1. 进入 **1Panel -> 容器 -> 编排 -> 创建编排**。
-2. 填入名称 `muse-audio`，并将 `docker-compose.yml` 贴入：
-   ```yaml
-   services:
-     muse-audio:
-       container_name: muse-audio
-       build:
-         context: .
-         dockerfile: Dockerfile
-       image: muse-audio:latest
-       restart: unless-stopped
-       ports:
-         - "3001:3001"
-       environment:
-         - PORT=3001
-         - ASPNETCORE_ENVIRONMENT=Production
-   ```
-3. 点击 **确认**，1Panel 会自动拉取基础镜像、编译并启动容器。
+```bash
+# 1. 拉取最新代码
+git pull origin main
 
-### 3. Nginx / 1Panel 反向代理配置（推荐）
+# 2. 重新编译镜像并重启容器
+docker compose up -d --build
+```
+
+---
+
+### 🌐 Nginx / 1Panel 反向代理配置（可选）
 
 若使用域名（如 `https://music.example.com`）反向代理 `http://127.0.0.1:3001`，为保证高保真流媒体点播与断点续传顺畅，请在反代配置中**关闭缓冲区并传递 Range 请求头**：
 
@@ -262,25 +265,9 @@ location / {
 }
 ```
 
-### 4. 🔄 Docker 一键更新与重新部署
+---
 
-当远程仓库有新版本发布或更新代码后，只需在项目目录下执行一行命令或一键脚本即可完成拉取、重新构建、平滑替换与垃圾镜像清理：
-
-#### 方式 A：运行一键更新脚本（最推荐）
-```bash
-chmod +x docker-update.sh
-./docker-update.sh
-```
-
-#### 方式 B：单行命令更新部署
-```bash
-git fetch --all && git reset --hard origin/main && docker compose up -d --build && docker image prune -f
-```
-
-#### 方式 C：1Panel 可视化更新
-进入 **1Panel -> 容器 -> 编排（或容器）**，找到 `muse-audio`，点击右侧操作中的 **重新构建** 或 **重启** 即可自动拉取并应用最新镜像。
-
-### 5. 常用运维管理命令
+## 🛠️ 常用运维管理命令
 
 ```bash
 # 查看实时日志
@@ -295,25 +282,6 @@ docker compose down
 # 重启容器
 docker compose restart
 ```
-
----
-
-## 本地开发
-
-**前置要求：** Node.js
-
-```bash
-# 安装依赖
-npm install
-
-# 配置 Gemini API Key
-# 在 .env.local 中设置 GEMINI_API_KEY
-
-# 启动开发服务器
-npm run dev
-```
-
-开发服务器默认运行在 `http://localhost:3000`，API 请求自动代理到 `http://dxcool.cn:3001`。
 
 ---
 
