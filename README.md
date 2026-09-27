@@ -107,7 +107,11 @@ muse-app/
 ├── .github/workflows/            # CI/CD 工作流 (6个平台)
 ├── docs/apple-build.md           # Apple 平台构建指南
 ├── harmonyos/BUILD.md            # 鸿蒙构建指南
-├── Dockerfile                    # Docker 构建 (Android APK)
+├── Dockerfile                    # Docker 生产服务端构建 (.NET 8 + 静态 Web)
+├── Dockerfile.android            # Docker 构建 (Android APK)
+├── docker-compose.yml            # Docker Compose 一键编排文件
+├── docker-deploy.sh              # Docker 一键部署脚本 (Linux/macOS)
+├── docker-deploy.bat             # Docker 一键部署脚本 (Windows)
 ├── capacitor.config.ts           # Capacitor 配置
 ├── vite.config.ts                # Vite 构建配置
 └── package.json                  # 项目配置与依赖
@@ -188,6 +192,86 @@ muse-app/
 | Android | Tauri 2 + Capacitor | APK、前台媒体服务、后台播放 |
 | iOS | Tauri 2 + 原生 AVPlayer | 后台音频、锁屏控制、Now Playing |
 | HarmonyOS | ArkWeb WebView 壳 | DevEco Studio、HAP 打包 |
+
+---
+
+## 🐳 Docker 服务端一键部署
+
+项目提供完整的生产级 Dockerfile 与 Docker Compose 编排，内嵌最新编译的前端静态 Web 页面与 .NET 8 API 后端，支持单命令一键部署与开箱即用。
+
+### 1. 终端一键运行 (Linux / VPS)
+
+```bash
+# 1. 克隆代码仓库并进入目录
+git clone https://github.com/XCool-603/Music.git
+cd Music
+
+# 2. 赋予脚本执行权限并一键启动
+chmod +x docker-deploy.sh
+./docker-deploy.sh
+
+# 或者使用原生 Docker Compose
+docker compose up -d --build
+```
+
+启动完成后：
+* 前端网页播放器：`http://服务器IP:3001/music/`
+* 后端 API 接口检查：`http://服务器IP:3001/api/music/banner`
+
+### 2. 1Panel 面板一键部署
+
+1. 进入 **1Panel -> 容器 -> 编排 -> 创建编排**。
+2. 填入名称 `muse-audio`，并将 `docker-compose.yml` 贴入：
+   ```yaml
+   services:
+     muse-audio:
+       container_name: muse-audio
+       build:
+         context: .
+         dockerfile: Dockerfile
+       image: muse-audio:latest
+       restart: unless-stopped
+       ports:
+         - "3001:3001"
+       environment:
+         - PORT=3001
+         - ASPNETCORE_ENVIRONMENT=Production
+   ```
+3. 点击 **确认**，1Panel 会自动拉取基础镜像、编译并启动容器。
+
+### 3. Nginx / 1Panel 反向代理配置（推荐）
+
+若使用域名（如 `https://music.example.com`）反向代理 `http://127.0.0.1:3001`，为保证高保真流媒体点播与断点续传顺畅，请在反代配置中**关闭缓冲区并传递 Range 请求头**：
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:3001;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # 音频大文件与流媒体关键优化（防止 206 阶段被缓冲中断）
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_http_version 1.1;
+    proxy_set_header Range $http_range;
+    proxy_set_header If-Range $http_if_range;
+}
+```
+
+### 4. 常用管理与后续更新
+
+```bash
+# 查看运行日志
+docker compose logs -f
+
+# 重启服务
+docker compose restart
+
+# 一键拉取最新代码并热重构更新
+git pull origin main && docker compose up -d --build
+```
 
 ---
 
