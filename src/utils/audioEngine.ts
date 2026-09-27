@@ -671,17 +671,21 @@ class AudioEngine {
   }
 
   private ensureCleanAudioElement() {
-    if (this.sourceNode) {
+    if (this.sourceNode || (this.audioElement && this.audioElement.hasAttribute('crossorigin'))) {
       // An Audio element already hooked to createMediaElementSource will be silenced
       // by the browser when playing cross-origin audio without CORS headers.
       // Reset and create a clean unhooked Audio element for direct speaker output.
       if (this.audioElement) {
         this.audioElement.pause();
+        this.audioElement.removeAttribute('crossorigin');
+        this.audioElement.crossOrigin = null;
         this.audioElement.src = '';
       }
       this.audioElement = new Audio();
       this.audioElement.preload = 'auto';
       this.audioElement.volume = this.currentVolume;
+      this.audioElement.removeAttribute('crossorigin');
+      this.audioElement.crossOrigin = null;
       this.sourceNode = null;
       this.isConnectedToGraph = false;
     }
@@ -796,10 +800,15 @@ class AudioEngine {
     if (isExternal) {
       this.ensureCleanAudioElement();
       // Direct CDN stream playback:
-      // Leave crossOrigin empty so browser performs standard media request without CORS restrictions.
-      this.audioElement.crossOrigin = '';
+      // Remove crossorigin attribute completely so the browser performs standard media request without CORS restrictions.
+      // Setting crossOrigin = '' in JS sets crossorigin="" which the HTML spec defines as Anonymous CORS!
+      this.audioElement.removeAttribute('crossorigin');
+      this.audioElement.crossOrigin = null;
     } else {
-      this.audioElement.crossOrigin = finalUrl.startsWith('http://') || finalUrl.startsWith('https://') ? 'anonymous' : '';
+      this.audioElement.crossOrigin = finalUrl.startsWith('http://') || finalUrl.startsWith('https://') ? 'anonymous' : null;
+      if (this.isInitialized && !this.sourceNode) {
+        this.tryConnectMediaSource();
+      }
     }
 
     this.audioElement.pause();
@@ -814,6 +823,8 @@ class AudioEngine {
         const proxyUrl = apiUrl(`/api/proxy/audio?url=${encodeURIComponent(finalUrl)}`);
         console.warn('[AudioEngine] Retrying stream through backend audio proxy:', proxyUrl);
         if (this.audioElement) {
+          this.audioElement.removeAttribute('crossorigin');
+          this.audioElement.crossOrigin = null;
           this.audioElement.src = proxyUrl;
           this.audioElement.play().catch(() => {});
           return;
