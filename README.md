@@ -112,6 +112,8 @@ muse-app/
 ├── docker-compose.yml            # Docker Compose 一键编排文件
 ├── docker-deploy.sh              # Docker 一键部署脚本 (Linux/macOS)
 ├── docker-deploy.bat             # Docker 一键部署脚本 (Windows)
+├── docker-update.sh              # Docker 一键更新部署脚本 (Linux/macOS)
+├── docker-update.bat             # Docker 一键更新部署脚本 (Windows)
 ├── capacitor.config.ts           # Capacitor 配置
 ├── vite.config.ts                # Vite 构建配置
 └── package.json                  # 项目配置与依赖
@@ -260,17 +262,38 @@ location / {
 }
 ```
 
-### 4. 常用管理与后续更新
+### 4. 🔄 Docker 一键更新与重新部署
+
+当远程仓库有新版本发布或更新代码后，只需在项目目录下执行一行命令或一键脚本即可完成拉取、重新构建、平滑替换与垃圾镜像清理：
+
+#### 方式 A：运行一键更新脚本（最推荐）
+```bash
+chmod +x docker-update.sh
+./docker-update.sh
+```
+
+#### 方式 B：单行命令更新部署
+```bash
+git fetch --all && git reset --hard origin/main && docker compose up -d --build && docker image prune -f
+```
+
+#### 方式 C：1Panel 可视化更新
+进入 **1Panel -> 容器 -> 编排（或容器）**，找到 `muse-audio`，点击右侧操作中的 **重新构建** 或 **重启** 即可自动拉取并应用最新镜像。
+
+### 5. 常用运维管理命令
 
 ```bash
-# 查看运行日志
+# 查看实时日志
 docker compose logs -f
 
-# 重启服务
-docker compose restart
+# 查看容器运行状态与端口
+docker compose ps
 
-# 一键拉取最新代码并热重构更新
-git pull origin main && docker compose up -d --build
+# 停止服务
+docker compose down
+
+# 重启容器
+docker compose restart
 ```
 
 ---
