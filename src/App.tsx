@@ -111,13 +111,20 @@ async function resolveDirectAudioUrl(track: Track, quality: StreamQuality): Prom
       const res = await fetch(apiUrl(`${v2Url}${sep}format=json`), { signal: AbortSignal.timeout(4000) });
       if (res.ok) {
         const data = await res.json();
-        if (data && data.url) return data.url;
+        if (data && data.url) {
+          return typeof window !== 'undefined' && window.location.protocol === 'https:' && data.url.startsWith('http://')
+            ? data.url.replace(/^http:\/\//i, 'https://')
+            : data.url;
+        }
       }
     } catch {
       // ignore
     }
     // Fallback: direct 302 redirect URL (never /api/proxy/audio)
-    return apiUrl(v2Url);
+    const directUrl = apiUrl(v2Url);
+    return typeof window !== 'undefined' && window.location.protocol === 'https:' && directUrl.startsWith('http://')
+      ? directUrl.replace(/^http:\/\//i, 'https://')
+      : directUrl;
   }
 
   // 2. If it's a v1 stream URL (/api/music/stream)
@@ -140,11 +147,18 @@ async function resolveDirectAudioUrl(track: Track, quality: StreamQuality): Prom
       // ignore
     }
     // Fallback: direct stream with quality param
-    return rawUrl.replace(/(level=)[^&]*/, `$1${quality}`) +
+    const streamFallback = rawUrl.replace(/(level=)[^&]*/, `$1${quality}`) +
       (rawUrl.includes('level=') ? '' : `&level=${quality}`);
+    return typeof window !== 'undefined' && window.location.protocol === 'https:' && streamFallback.startsWith('http://')
+      ? streamFallback.replace(/^http:\/\//i, 'https://')
+      : streamFallback;
   }
 
   // 3. Otherwise it's already a direct CDN link or local/data URL
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:' && rawUrl.startsWith('http://')) {
+    return rawUrl.replace(/^http:\/\//i, 'https://');
+  }
+
   return rawUrl;
 }
 
