@@ -35,7 +35,6 @@ release/
 # Build outputs (regenerated)
 **/bin/
 **/obj/
-**/wwwroot/music/assets/
 background/publish-linux-x64/
 
 # Local tools
