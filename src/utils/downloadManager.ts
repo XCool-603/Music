@@ -1,6 +1,7 @@
 import { Track, CustomSourceScript, StreamQuality } from '../types';
 import { SourceScriptRunner } from './sourceScriptEngine';
 import { apiUrl } from './apiBase';
+import { saveLocalAudioBlob } from './localTrackStore';
 
 export interface DownloadTask {
   id: string;
@@ -70,8 +71,9 @@ export function triggerBlobDownload(blob: Blob, filename: string) {
  * Trigger download via an anchor direct link
  */
 export function triggerDirectDownload(url: string, filename: string) {
+  const fullUrl = url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:') ? url : apiUrl(url);
   const a = document.createElement('a');
-  a.href = url;
+  a.href = fullUrl;
   a.download = sanitizeFilename(filename);
   a.target = '_blank';
   document.body.appendChild(a);
@@ -89,12 +91,21 @@ export async function resolveTrackDownloadUrl(
   customScripts: CustomSourceScript[] = [],
   quality: StreamQuality = 'high'
 ): Promise<string> {
-  // 1. If it's already a direct http / local blob url
-  if (track.audioUrl && !track.audioUrl.startsWith('/api/music/stream')) {
+  // 1. If it's already a local blob / data url
+  if (track.audioUrl && (track.audioUrl.startsWith('blob:') || track.audioUrl.startsWith('data:'))) {
     return track.audioUrl;
   }
 
-  // 2. If it's from a custom JS script
+  // 2. If it's a direct external http(s) URL (not an internal /api/ endpoint)
+  if (
+    track.audioUrl &&
+    (track.audioUrl.startsWith('http://') || track.audioUrl.startsWith('https://')) &&
+    !track.audioUrl.includes('/api/')
+  ) {
+    return track.audioUrl;
+  }
+
+  // 3. If it's from a custom JS script
   if (track.sourceScriptId && track.sourceKey) {
     const script = customScripts.find((s) => s.id === track.sourceScriptId);
     if (script && script.enabled) {
@@ -102,38 +113,56 @@ export async function resolveTrackDownloadUrl(
         const runner = new SourceScriptRunner(script);
         await runner.init();
         const directUrl = await runner.resolveAudioUrl(track, quality === 'lossless' ? 'lossless' : '320k');
-        if (directUrl) return directUrl;
+        if (directUrl && directUrl.startsWith('http') && !directUrl.includes('itunes.apple.com')) {
+          return directUrl;
+        }
       } catch (err) {
         console.warn('[Download] Script URL resolution failed:', err);
       }
     }
   }
 
-  // 3. If track has audioUrl as /api/music/stream — resolve the direct
-  //    official/CDN link honoring the requested quality (single bandwidth).
-  //    Fall back to the proxied stream when the direct URL cannot be resolved.
-  if (track.audioUrl) {
-    if (track.audioUrl.includes('/api/music/stream')) {
-      try {
-        const source = track.sourceKey || (track.id.startsWith('ne_') ? 'netease' : 'kuwo');
-        const r = await fetch(
-          apiUrl(
-            `/api/music/stream-url?source=${source}&id=${encodeURIComponent(ridFrom(track))}&rid=${encodeURIComponent(ridFrom(track))}&level=${quality}`
-          )
-        );
-        if (r.ok) {
-          const data = await r.json();
-          if (data && data.url) return data.url;
+  const rid = ridFrom(track);
+  const source = ridSourceFrom(track);
+
+  // 4. Resolve official v2 URL (/api/v2/song/url?format=json)
+  if (rid) {
+    try {
+      const v2Url = apiUrl(
+        `/api/v2/song/url?source=${source}&id=${encodeURIComponent(rid)}&quality=${quality}&format=json`
+      );
+      const res = await fetch(v2Url, { signal: AbortSignal.timeout(6000) });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.url && typeof data.url === 'string' && data.url.startsWith('http')) {
+          return data.url;
         }
-      } catch (err) {
-        console.warn('[Download] Direct URL resolve failed, using proxied stream:', err);
       }
+    } catch (err) {
+      console.warn('[Download] v2 URL resolution failed:', err);
     }
-    return track.audioUrl;
   }
 
-  // 4. Fallback Kuwo / NetEase stream resolver
-  return `/api/music/stream?source=${ridSourceFrom(track)}&id=${ridFrom(track)}&rid=${ridFrom(track)}&level=${quality}`;
+  // 5. Fallback v1 stream-url resolver
+  if (rid) {
+    try {
+      const v1Url = apiUrl(
+        `/api/music/stream-url?source=${source}&id=${encodeURIComponent(rid)}&rid=${encodeURIComponent(rid)}&level=${quality}`
+      );
+      const res = await fetch(v1Url, { signal: AbortSignal.timeout(6000) });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.url && typeof data.url === 'string' && data.url.startsWith('http')) {
+          return data.url;
+        }
+      }
+    } catch (err) {
+      console.warn('[Download] v1 stream-url resolution failed:', err);
+    }
+  }
+
+  // 6. Absolute URL to backend stream proxy as guaranteed fallback
+  return apiUrl(`/api/v2/song/url?source=${source}&id=${encodeURIComponent(rid)}&quality=${quality}`);
 }
 
 function ridFrom(track: Track): string {
@@ -190,6 +219,7 @@ export async function downloadTrackAudio(
       const resp = await fetch(resolvedUrl);
       const blob = await resp.blob();
       triggerBlobDownload(blob, filename);
+      saveLocalAudioBlob(track.id, blob).catch(() => {});
 
       task.progress = 100;
       task.status = 'completed';
@@ -205,12 +235,15 @@ export async function downloadTrackAudio(
         const directResp = await fetch(resolvedUrl, { mode: 'cors' });
         if (directResp.ok) {
           const directBlob = await directResp.blob();
-          triggerBlobDownload(directBlob, filename);
-          task.progress = 100;
-          task.status = 'completed';
-          notifyListeners();
-          onProgress?.(100);
-          return true;
+          if (directBlob.size > 1024) {
+            triggerBlobDownload(directBlob, filename);
+            saveLocalAudioBlob(track.id, directBlob).catch(() => {});
+            task.progress = 100;
+            task.status = 'completed';
+            notifyListeners();
+            onProgress?.(100);
+            return true;
+          }
         }
       } catch (directErr) {
         console.warn('[Download] Direct CDN download blocked by CORS, using backend proxy:', directErr);
@@ -218,23 +251,36 @@ export async function downloadTrackAudio(
     }
 
     // 3. Backend download proxy fallback with progress tracking
-    const rid = track.sourceRawInfo?.id || track.sourceRawInfo?.songmid || track.id.replace(/^(kw_|ne_|tx_)/, '');
-    const source = track.sourceKey || (track.id.startsWith('ne_') ? 'netease' : 'kuwo');
-    
-    const downloadApiUrl = apiUrl(`/api/music/download?url=${encodeURIComponent(resolvedUrl)}&filename=${encodeURIComponent(
-      filename
-    )}&source=${source}&id=${rid}&rid=${rid}&level=${quality}&artist=${encodeURIComponent(track.artist)}&title=${encodeURIComponent(track.title)}`);
+    const rid = ridFrom(track);
+    const source = ridSourceFrom(track);
+
+    const downloadApiUrl = apiUrl(
+      `/api/music/download?url=${encodeURIComponent(resolvedUrl)}&filename=${encodeURIComponent(
+        filename
+      )}&source=${source}&id=${encodeURIComponent(rid)}&rid=${encodeURIComponent(rid)}&level=${quality}&artist=${encodeURIComponent(
+        track.artist
+      )}&title=${encodeURIComponent(track.title)}`
+    );
 
     const response = await fetch(downloadApiUrl);
     if (!response.ok) {
-      throw new Error(`Server returned status ${response.status}`);
+      throw new Error(`服务器响应错误: HTTP ${response.status}`);
+    }
+
+    const contentType = (response.headers.get('Content-Type') || '').toLowerCase();
+    if (contentType.includes('text/') || contentType.includes('application/json')) {
+      const errText = await response.text();
+      throw new Error(`下载服务异常: ${errText.slice(0, 80)}`);
     }
 
     const contentLength = +(response.headers.get('Content-Length') || 0);
+    const mimeType = filename.endsWith('.flac') ? 'audio/flac' : 'audio/mpeg';
+
     if (!response.body || contentLength === 0) {
       // Direct blob fallback
       const blob = await response.blob();
       triggerBlobDownload(blob, filename);
+      saveLocalAudioBlob(track.id, blob).catch(() => {});
     } else {
       const reader = response.body.getReader();
       let receivedBytes = 0;
@@ -253,10 +299,9 @@ export async function downloadTrackAudio(
         }
       }
 
-      // Pass chunks array directly to Blob — avoids an extra full copy.
-      const mimeType = filename.endsWith('.flac') ? 'audio/flac' : 'audio/mpeg';
       const blob = new Blob(chunks, { type: mimeType });
       triggerBlobDownload(blob, filename);
+      saveLocalAudioBlob(track.id, blob).catch(() => {});
     }
 
     task.progress = 100;
@@ -272,9 +317,13 @@ export async function downloadTrackAudio(
 
     // Fallback: try direct browser download popup
     try {
-      const rid = track.sourceRawInfo?.id || track.sourceRawInfo?.songmid || track.id.replace(/^(kw_|ne_|tx_)/, '');
-      const source = track.sourceKey || (track.id.startsWith('ne_') ? 'netease' : 'kuwo');
-      const fallbackUrl = `/api/music/download?source=${source}&id=${rid}&filename=${encodeURIComponent(filename)}`;
+      const rid = ridFrom(track);
+      const source = ridSourceFrom(track);
+      const fallbackUrl = apiUrl(
+        `/api/music/download?source=${source}&id=${encodeURIComponent(rid)}&filename=${encodeURIComponent(
+          filename
+        )}&level=${quality}`
+      );
       triggerDirectDownload(fallbackUrl, filename);
     } catch {}
 
@@ -310,19 +359,34 @@ export async function downloadTrackLyrics(track: Track): Promise<boolean> {
 
     // If lyrics are not stored locally in track, fetch from backend API
     if (!lrcContent || lrcContent.length < 10) {
-      const rid = track.sourceRawInfo?.id || track.sourceRawInfo?.songmid || track.id.replace(/^(kw_|ne_|tx_)/, '');
-      const source = track.sourceKey || (track.id.startsWith('ne_') ? 'netease' : 'kuwo');
-      const res = await fetch(apiUrl(`/api/music/lyric?source=${source}&id=${rid}&rid=${rid}`));
-      const data = await res.json();
-      if (data && data.lrc) {
-        lrcContent = data.lrc;
+      const rid = ridFrom(track);
+      const source = ridSourceFrom(track);
+      try {
+        const v2Res = await fetch(apiUrl(`/api/v2/song/lyric?source=${source}&id=${encodeURIComponent(rid)}`));
+        if (v2Res.ok) {
+          const v2Data = await v2Res.json();
+          if (v2Data && v2Data.lrc) {
+            lrcContent = v2Data.lrc;
+            if (v2Data.translation) {
+              lrcContent += `\n${v2Data.translation}`;
+            }
+          }
+        }
+      } catch {}
+
+      if (!lrcContent) {
+        const res = await fetch(apiUrl(`/api/music/lyric?source=${source}&id=${rid}&rid=${rid}`));
+        const data = await res.json();
+        if (data && data.lrc) {
+          lrcContent = data.lrc;
+        }
       }
     }
 
     if (!lrcContent) {
-      lrcContent = `[ti:${track.title}]\n[ar:${track.artist}]\n[al:${track.album}]\n[by:Wavesound HiFi Music Player]\n[00:00.00]${track.title} - ${track.artist}\n`;
+      lrcContent = `[ti:${track.title}]\n[ar:${track.artist}]\n[al:${track.album}]\n[by:MUSE.AUDIO Hi-Fi Music Player]\n[00:00.00]${track.title} - ${track.artist}\n`;
     } else if (!lrcContent.includes('[ti:')) {
-      lrcContent = `[ti:${track.title}]\n[ar:${track.artist}]\n[al:${track.album}]\n[by:Wavesound Music Player]\n${lrcContent}`;
+      lrcContent = `[ti:${track.title}]\n[ar:${track.artist}]\n[al:${track.album}]\n[by:MUSE.AUDIO Music Player]\n${lrcContent}`;
     }
 
     const blob = new Blob([lrcContent], { type: 'text/plain;charset=utf-8' });

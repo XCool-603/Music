@@ -89,7 +89,7 @@ export const MyView: React.FC<MyViewProps> = ({
           {
             icon: <ArrowUpCircle className="w-6 h-6" />,
             label: '检查更新',
-            desc: 'v1.0.0 最新版',
+            desc: 'v1.0.1 最新版',
             color: 'text-teal-400 bg-teal-500/15 border-teal-500/25',
             onClick: onCheckUpdate,
           },

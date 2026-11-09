@@ -17,7 +17,7 @@ public class SystemController : ControllerBase
         Timeout = TimeSpan.FromSeconds(8)
     };
 
-    private const string CurrentVersion = "1.0.0";
+    private const string CurrentVersion = "1.0.1";
     private const string GitHubRepo = "XCool-603/Music";
 
     static SystemController()

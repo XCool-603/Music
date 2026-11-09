@@ -38,6 +38,7 @@ import { MobileBottomNav } from './components/MobileBottomNav';
 import { MyView } from './components/MyView';
 import { DownloadToastNotification } from './components/DownloadToastNotification';
 import { downloadBatchTracks } from './utils/downloadManager';
+import { reviveLocalTracks } from './utils/localTrackStore';
 import type { PlaylistDetailViewProps } from './components/PlaylistDetailView';
 
 // Code-splitting via React.lazy for non-initial heavy views and modals
@@ -188,7 +189,8 @@ export default function App() {
 
         // Merge with user-imported local tracks from localStorage
         const saved = localStorage.getItem('wavesound_local_tracks');
-        const localTracks: Track[] = saved ? (() => { try { return JSON.parse(saved); } catch { return []; } })() : [];
+        const rawLocalTracks: Track[] = saved ? (() => { try { return JSON.parse(saved); } catch { return []; } })() : [];
+        const localTracks = await reviveLocalTracks(rawLocalTracks);
         setTracks([...apiTracks, ...localTracks]);
 
         // Merge with user-created playlists from localStorage
@@ -203,7 +205,7 @@ export default function App() {
         console.error('Failed to load discovery data:', err);
         // Fallback: try loading from localStorage only
         const saved = localStorage.getItem('wavesound_local_tracks');
-        if (saved) { try { setTracks(JSON.parse(saved)); } catch {} }
+        if (saved) { try { const revived = await reviveLocalTracks(JSON.parse(saved)); setTracks(revived); } catch {} }
         const savedPl = localStorage.getItem('wavesound_custom_playlists');
         if (savedPl) { try { setPlaylists(JSON.parse(savedPl)); } catch {} }
         setDataLoaded(true);
@@ -837,18 +839,27 @@ export default function App() {
     });
   }, [currentTrack]);
 
-  // Keep Media Session playbackState in sync.
+  // Keep Media Session playbackState and lock-screen timeline in sync.
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
     navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
-  }, [isPlaying]);
+    if ('setPositionState' in navigator.mediaSession && duration > 0) {
+      try {
+        navigator.mediaSession.setPositionState({
+          duration: Math.max(0, duration),
+          playbackRate: isPlaying ? playbackSpeed : 0,
+          position: Math.min(Math.max(0, timeStore.getTime()), duration),
+        });
+      } catch {}
+    }
+  }, [isPlaying, duration, playbackSpeed]);
 
   // Android Native Notification Media Controls Listener (ACTION_PLAY_PAUSE, ACTION_NEXT, ACTION_PREV)
   useEffect(() => {
     const handleNativeMediaAction = (e: Event) => {
       const customEvent = e as CustomEvent<string>;
       const action = customEvent.detail;
-      if (action === 'play_pause') {
+      if (action === 'play_pause' || action === 'playPause') {
         handleTogglePlayRef.current();
       } else if (action === 'next') {
         handleNextRef.current();

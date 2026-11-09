@@ -6,7 +6,7 @@
 
 import { apiUrl } from './apiBase';
 
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.0.1';
 export const GITHUB_REPO = 'XCool-603/Music';
 export const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
 export const MIRROR_RELEASE_API = `https://ghfast.top/https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;

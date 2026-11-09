@@ -767,6 +767,11 @@ class AudioEngine {
     const playUrl = this.normalizeAudioUrl(url);
 
     if (this.isUsingNativePlayback()) {
+      // Native AVPlayer cannot access WebKit blob: or data: URLs. Always route to HTML5 audio.
+      if (playUrl.startsWith('blob:') || playUrl.startsWith('data:')) {
+        this.loadTrackHtml5(playUrl, onEnded, onError);
+        return;
+      }
       // Native AVPlayer: hand the resolved URL straight to the plugin and let it
       // own loading + background playback. If the plugin call fails, fall back to
       // the HTML5 path so the session still works.

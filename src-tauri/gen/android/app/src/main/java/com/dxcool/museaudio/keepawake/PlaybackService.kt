@@ -10,6 +10,7 @@ import android.app.Service
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.net.wifi.WifiManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 
@@ -24,6 +25,7 @@ class PlaybackService : Service() {
     const val ACTION_PLAY_PAUSE = "com.dxcool.museaudio.ACTION_PLAY_PAUSE"
     const val ACTION_NEXT = "com.dxcool.museaudio.ACTION_NEXT"
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
     private var running = false
     private var lastTitle: String = "MUSE.AUDIO"
     private var lastArtist: String = ""
@@ -51,12 +53,14 @@ class PlaybackService : Service() {
     running = true
     audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
     acquireWakeLock()
+    acquireWifiLock()
     requestAudioFocus()
   }
 
   override fun onDestroy() {
     running = false
     releaseWakeLock()
+    releaseWifiLock()
     abandonAudioFocus()
     super.onDestroy()
   }
@@ -64,7 +68,7 @@ class PlaybackService : Service() {
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     when (intent?.action) {
       ACTION_PREV -> com.dxcool.museaudio.MainActivity.sendMediaAction("prev")
-      ACTION_PLAY_PAUSE -> com.dxcool.museaudio.MainActivity.sendMediaAction("playPause")
+      ACTION_PLAY_PAUSE -> com.dxcool.museaudio.MainActivity.sendMediaAction("play_pause")
       ACTION_NEXT -> com.dxcool.museaudio.MainActivity.sendMediaAction("next")
     }
     if (intent?.hasExtra("title") == true) {
@@ -115,7 +119,8 @@ class PlaybackService : Service() {
       .addAction(android.R.drawable.ic_media_next, "下一首", nextIntent)
       .setOngoing(true)
       .setShowWhen(false)
-      .setPriority(NotificationCompat.PRIORITY_LOW)
+      .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+      .setPriority(NotificationCompat.PRIORITY_DEFAULT)
       .build()
     val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
@@ -128,9 +133,10 @@ class PlaybackService : Service() {
   private fun ensureChannel() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-      val channel = NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW)
+      val channel = NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT)
       channel.setShowBadge(false)
       channel.setSound(null, null)
+      channel.lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
       nm.createNotificationChannel(channel)
     }
   }
@@ -155,6 +161,28 @@ class PlaybackService : Service() {
       // ignore
     }
     wakeLock = null
+  }
+
+  private fun acquireWifiLock() {
+    try {
+      val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+      @Suppress("DEPRECATION")
+      val lock = wm?.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "muse-audio:wifi_playback")
+      lock?.setReferenceCounted(false)
+      lock?.acquire()
+      wifiLock = lock
+    } catch (e: Exception) {
+      e.printStackTrace()
+    }
+  }
+
+  private fun releaseWifiLock() {
+    try {
+      wifiLock?.let { if (it.isHeld) it.release() }
+    } catch (e: Exception) {
+      // ignore
+    }
+    wifiLock = null
   }
 
   private fun requestAudioFocus() {

@@ -1,7 +1,7 @@
 {
   "name": "muse-audio",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MUSE.AUDIO - 多端自适应Hi-Fi音乐播放器",
   "type": "module",
   "scripts": {

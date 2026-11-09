@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Track } from '../types';
 import { Upload, Music, FolderPlus, CheckCircle2, FileAudio } from 'lucide-react';
+import { saveLocalAudioBlob } from '../utils/localTrackStore';
 
 interface LocalFileImporterProps {
   onImportTracks: (tracks: Track[]) => void;
@@ -36,7 +37,11 @@ export const LocalFileImporter: React.FC<LocalFileImporterProps> = ({
 
     for (let i = 0; i < validFiles.length; i++) {
       const file = validFiles[i];
+      const trackId = `local-${Date.now()}-${i}`;
       const objectUrl = URL.createObjectURL(file);
+
+      // Persist audio binary in IndexedDB so it never expires on page reload
+      await saveLocalAudioBlob(trackId, file);
 
       // Clean title and artist from filename (e.g. "Artist - Song.mp3" or "Song.mp3")
       const rawName = file.name.replace(/\.[^/.]+$/, '');
@@ -57,7 +62,7 @@ export const LocalFileImporter: React.FC<LocalFileImporterProps> = ({
       const color = themeColors[Math.abs(rawName.length) % themeColors.length];
 
       newTracks.push({
-        id: `local-${Date.now()}-${i}`,
+        id: trackId,
         title,
         artist,
         album: '本地导入单曲',
@@ -94,7 +99,7 @@ export const LocalFileImporter: React.FC<LocalFileImporterProps> = ({
       <div className="mb-6 text-center">
         <h2 className="text-2xl font-bold text-white mb-2">本地音乐快速导入</h2>
         <p className="text-sm text-slate-400">
-          支持 MP3、WAV、FLAC、M4A、OGG 等格式，纯前端私密解析，不上传任何服务器
+          支持 MP3、WAV、FLAC、M4A、OGG 等格式，纯前端私密解析，永久离线保存播放
         </p>
       </div>
 
@@ -135,7 +140,7 @@ export const LocalFileImporter: React.FC<LocalFileImporterProps> = ({
               {isProcessing ? '正在解析音频文件...' : '拖拽音频文件到此处，或点击浏览上传'}
             </h3>
             <p className="text-xs text-slate-400 mt-1">
-              支持多选文件批量导入，自动提取曲目名称与艺术家
+              支持多选文件批量导入，自动提取曲目名称与艺术家，离线永久保存
             </p>
           </div>
 
@@ -171,8 +176,8 @@ export const LocalFileImporter: React.FC<LocalFileImporterProps> = ({
         </div>
         <div className="p-4 bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10">
           <FolderPlus className="w-5 h-5 text-emerald-400 mb-2" />
-          <h4 className="text-sm font-semibold text-white">无损私密</h4>
-          <p className="text-xs text-slate-400 mt-1">文件仅驻留浏览器内存，安全无追踪</p>
+          <h4 className="text-sm font-semibold text-white">持久离线</h4>
+          <p className="text-xs text-slate-400 mt-1">音频安全储存于设备本地，刷新不失效</p>
         </div>
       </div>
     </div>

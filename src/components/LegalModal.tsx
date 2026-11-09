@@ -232,7 +232,7 @@ export const LegalModal: React.FC<LegalModalProps> = ({
               <div className="p-3 rounded-lg bg-zinc-800/80 border border-zinc-700/60 text-xs space-y-1.5">
                 <div className="flex justify-between">
                   <span className="text-zinc-400">当前版本：</span>
-                  <span className="font-mono text-indigo-400 font-medium">v1.0.0 (Official Release)</span>
+                  <span className="font-mono text-indigo-400 font-medium">v1.0.1 (Official Release)</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-zinc-400">开源协议：</span>

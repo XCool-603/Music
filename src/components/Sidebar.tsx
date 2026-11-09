@@ -162,7 +162,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <span>检查更新</span>
                 </div>
                 <span className="text-[10px] font-mono text-emerald-400/90 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                  v1.0.0
+                  v1.0.1
                 </span>
               </button>
             )}

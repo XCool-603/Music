@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using Muse.Audio.Api.Models;
 using Muse.Audio.Api.Services;
+using Muse.Audio.Api.Services.Official;
 
 namespace Muse.Audio.Api.Controllers;
 
@@ -9,8 +10,15 @@ namespace Muse.Audio.Api.Controllers;
 [Route("api")]
 public class MusicController : ControllerBase
 {
-    private static readonly MusicService _music = new();
+    private readonly MusicService _music;
+    private readonly V2MusicService? _v2;
     private static readonly HttpClient _http = new();
+
+    public MusicController(IServiceProvider sp)
+    {
+        _music = sp.GetService<MusicService>() ?? new MusicService();
+        _v2 = sp.GetService<V2MusicService>();
+    }
 
     [HttpGet("health")]
     public IActionResult Health() => Ok(new { status = "ok", timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
@@ -56,8 +64,24 @@ public class MusicController : ControllerBase
         [FromQuery] string? rid = null,
         [FromQuery] string level = "standard")
     {
-        var resolvedId = rid ?? id;
-        var url = await _music.ResolveStreamUrlAsync(source.ToLower().Trim(), id.Trim(), resolvedId.Trim(), level.ToLower().Trim());
+        var resolvedId = string.IsNullOrEmpty(rid) ? id : rid;
+        string? url = null;
+
+        // Try v2 official client first
+        if (_v2 != null && !string.IsNullOrEmpty(resolvedId))
+        {
+            var (v2Url, _) = await _v2.ResolveSongUrlAsync(source.ToLower().Trim(), resolvedId.Trim(), level.ToLower().Trim());
+            if (!string.IsNullOrEmpty(v2Url))
+            {
+                url = v2Url;
+            }
+        }
+
+        if (string.IsNullOrEmpty(url))
+        {
+            url = await _music.ResolveStreamUrlAsync(source.ToLower().Trim(), id.Trim(), resolvedId.Trim(), level.ToLower().Trim());
+        }
+
         if (string.IsNullOrEmpty(url))
             return NotFound(new { url = "", error = "Audio stream not available" });
 
@@ -94,7 +118,7 @@ public class MusicController : ControllerBase
         [FromQuery] string filename = "music.mp3",
         [FromQuery] string level = "high")
     {
-        var resolvedRid = rid ?? id;
+        var resolvedRid = string.IsNullOrEmpty(rid) ? id : rid;
         filename = SanitizeFilename(filename);
         if (!filename.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase) &&
             !filename.EndsWith(".flac", StringComparison.OrdinalIgnoreCase) &&
@@ -102,14 +126,35 @@ public class MusicController : ControllerBase
             !filename.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
             filename += ".mp3";
 
-        if (string.IsNullOrEmpty(url) || url.StartsWith("/api/music/stream"))
+        // If url is not an absolute HTTP/HTTPS URL, resolve it via v2 / v1 services
+        if (string.IsNullOrEmpty(url) ||
+            (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+             !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
         {
-            url = await _music.ResolveStreamUrlAsync(source.ToLower().Trim(), id.Trim(), resolvedRid.Trim(), level.ToLower().Trim()) ?? "";
+            var songId = !string.IsNullOrEmpty(resolvedRid) ? resolvedRid : id;
+            if (_v2 != null && !string.IsNullOrEmpty(songId))
+            {
+                var (v2Url, _) = await _v2.ResolveSongUrlAsync(source.ToLower().Trim(), songId.Trim(), level.ToLower().Trim());
+                if (!string.IsNullOrEmpty(v2Url))
+                {
+                    url = v2Url;
+                }
+            }
+
+            if (string.IsNullOrEmpty(url) ||
+                (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                 !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+            {
+                url = await _music.ResolveStreamUrlAsync(source.ToLower().Trim(), id.Trim(), resolvedRid.Trim(), level.ToLower().Trim()) ?? "";
+            }
         }
 
-        if (string.IsNullOrEmpty(url))
+        if (string.IsNullOrEmpty(url) ||
+            (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+             !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
         {
-            Response.StatusCode = 400;
+            Response.StatusCode = 404;
+            Response.ContentType = "text/plain; charset=utf-8";
             await Response.WriteAsync("Unable to resolve audio download stream URL");
             return;
         }
@@ -123,18 +168,50 @@ public class MusicController : ControllerBase
             else if (url.Contains("163.com") || url.Contains("126.net")) req.Headers.Add("Referer", "https://music.163.com/");
             else if (url.Contains("qq.com")) req.Headers.Add("Referer", "https://y.qq.com/");
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(35));
             using var upstream = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
 
+            // If direct link failed or expired, attempt fallback resolution
             if (!upstream.IsSuccessStatusCode)
             {
+                var songId = !string.IsNullOrEmpty(resolvedRid) ? resolvedRid : id;
+                if (_v2 != null && !string.IsNullOrEmpty(songId))
+                {
+                    var (v2Url, _) = await _v2.ResolveSongUrlAsync(source.ToLower().Trim(), songId.Trim(), level.ToLower().Trim());
+                    if (!string.IsNullOrEmpty(v2Url) && v2Url != url)
+                    {
+                        var reqRetry = new HttpRequestMessage(HttpMethod.Get, v2Url);
+                        reqRetry.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+                        reqRetry.Headers.Add("Accept", "*/*");
+                        if (v2Url.Contains("kuwo.cn")) reqRetry.Headers.Add("Referer", "https://www.kuwo.cn/");
+                        else if (v2Url.Contains("163.com") || v2Url.Contains("126.net")) reqRetry.Headers.Add("Referer", "https://music.163.com/");
+
+                        using var upstreamRetry = await _http.SendAsync(reqRetry, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+                        if (upstreamRetry.IsSuccessStatusCode)
+                        {
+                            var enc = Uri.EscapeDataString(filename);
+                            Response.ContentType = upstreamRetry.Content.Headers.ContentType?.MediaType ?? (filename.EndsWith(".flac", StringComparison.OrdinalIgnoreCase) ? "audio/flac" : "audio/mpeg");
+                            Response.Headers["Content-Disposition"] = $"attachment; filename=\"{enc}\"; filename*=UTF-8''{enc}";
+                            Response.Headers["Access-Control-Allow-Origin"] = "*";
+                            if (upstreamRetry.Content.Headers.ContentLength.HasValue)
+                                Response.ContentLength = upstreamRetry.Content.Headers.ContentLength;
+
+                            await using var retryStream = await upstreamRetry.Content.ReadAsStreamAsync();
+                            await retryStream.CopyToAsync(Response.Body);
+                            await Response.CompleteAsync();
+                            return;
+                        }
+                    }
+                }
+
                 Response.StatusCode = (int)upstream.StatusCode;
-                await Response.WriteAsync("Upstream download server returned error");
+                Response.ContentType = "text/plain; charset=utf-8";
+                await Response.WriteAsync($"Upstream download server returned error: {upstream.StatusCode}");
                 return;
             }
 
             var encoded = Uri.EscapeDataString(filename);
-            Response.ContentType = upstream.Content.Headers.ContentType?.MediaType ?? "audio/mpeg";
+            Response.ContentType = upstream.Content.Headers.ContentType?.MediaType ?? (filename.EndsWith(".flac", StringComparison.OrdinalIgnoreCase) ? "audio/flac" : "audio/mpeg");
             Response.Headers["Content-Disposition"] = $"attachment; filename=\"{encoded}\"; filename*=UTF-8''{encoded}";
             Response.Headers["Access-Control-Allow-Origin"] = "*";
             if (upstream.Content.Headers.ContentLength.HasValue)
@@ -147,7 +224,11 @@ public class MusicController : ControllerBase
         catch (Exception ex)
         {
             if (!Response.HasStarted)
+            {
+                Response.StatusCode = 502;
+                Response.ContentType = "text/plain; charset=utf-8";
                 await Response.WriteAsync($"Download failed: {ex.Message}");
+            }
         }
     }
 

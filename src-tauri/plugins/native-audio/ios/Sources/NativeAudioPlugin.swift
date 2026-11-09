@@ -27,6 +27,7 @@ public class NativeAudioPlugin: Plugin {
   private var isPlaying = false
   private var playbackRate: Float = 1.0
   private var shouldResumeAfterInterruption = false
+  private var bgTaskId: UIBackgroundTaskIdentifier = .invalid
 
   // Cached Now Playing metadata (refreshed by the frontend on title changes).
   private var infoTitle: String?
@@ -82,11 +83,27 @@ public class NativeAudioPlugin: Plugin {
     if let errorObserver = errorObserver {
       NotificationCenter.default.removeObserver(errorObserver)
     }
+    endBackgroundTask()
     deactivateSession()
     Self.log.info("deinit: NativeAudioPlugin released")
   }
 
   // MARK: - Audio Session
+
+  private func beginBackgroundTask() {
+    if bgTaskId == .invalid {
+      bgTaskId = UIApplication.shared.beginBackgroundTask(withName: "MuseAudioLockScreenTask") { [weak self] in
+        self?.endBackgroundTask()
+      }
+    }
+  }
+
+  private func endBackgroundTask() {
+    if bgTaskId != .invalid {
+      UIApplication.shared.endBackgroundTask(bgTaskId)
+      bgTaskId = .invalid
+    }
+  }
 
   private func configureAudioSession() {
     let session = AVAudioSession.sharedInstance()
@@ -208,6 +225,7 @@ public class NativeAudioPlugin: Plugin {
       return
     }
     activateSession()
+    beginBackgroundTask()
     player.play()
     player.rate = playbackRate
     isPlaying = true
@@ -287,6 +305,7 @@ public class NativeAudioPlugin: Plugin {
   // MARK: - Playback plumbing
 
   private func pauseNativePlayback() {
+    endBackgroundTask()
     player.pause()
     isPlaying = false
     // Do NOT deactivate session immediately — keep it warm so the system
@@ -319,6 +338,7 @@ public class NativeAudioPlugin: Plugin {
     isPlaying = false
     let position = currentDuration()
     updateNowPlaying(position: position)
+    endBackgroundTask()
     // Deactivate session when track naturally ends
     deactivateSession()
     sendEvent(type: "ended", playing: false, position: position, duration: position)
@@ -336,6 +356,7 @@ public class NativeAudioPlugin: Plugin {
     if duration >= 0 { infoDuration = duration }
 
     var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [String: Any]()
+    info[MPNowPlayingInfoPropertyMediaType] = MPNowPlayingInfoMediaType.audio.rawValue
     if let t = infoTitle { info[MPMediaItemPropertyTitle] = t }
     if let a = infoArtist { info[MPMediaItemPropertyArtist] = a }
     if let al = infoAlbum { info[MPMediaItemPropertyAlbumTitle] = al }
@@ -353,6 +374,12 @@ public class NativeAudioPlugin: Plugin {
 
   private func setupRemoteCommands() {
     let commands = MPRemoteCommandCenter.shared()
+    commands.playCommand.isEnabled = true
+    commands.pauseCommand.isEnabled = true
+    commands.togglePlayPauseCommand.isEnabled = true
+    commands.nextTrackCommand.isEnabled = true
+    commands.previousTrackCommand.isEnabled = true
+    commands.changePlaybackPositionCommand.isEnabled = true
 
     commands.playCommand.addTarget { [weak self] _ in
       guard let self = self else { return .commandFailed }
