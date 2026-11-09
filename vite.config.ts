@@ -28,7 +28,7 @@ export default defineConfig(({ command }) => {
       strictPort: false,
       hmr: process.env.DISABLE_HMR !== 'true',
       watch: process.env.DISABLE_HMR === 'true' ? null : {
-        ignored: ['**/src-tauri/**', '**/harmonyos/**', '**/builds/**', '**/dist/**', '**/dist-tauri/**', '**/api-publish2/**'],
+        ignored: ['**/src-tauri/**', '**/harmonyos/**', '**/builds/**', '**/dist/**', '**/dist-tauri/**', '**/api-publish2/**', '**/background/**', '**/.git/**'],
       },
       proxy: {
         '/api': {
