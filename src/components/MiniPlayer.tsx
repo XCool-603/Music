@@ -18,6 +18,7 @@ import {
   PinOff,
   Move,
   X,
+  Disc3,
 } from 'lucide-react';
 
 interface MiniPlayerProps {
@@ -152,7 +153,16 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
     };
   }, [isDragging]);
 
-  if (!isOpen || !track) return null;
+  if (!isOpen) return null;
+
+  const displayTrack = track || {
+    id: 'empty',
+    title: '暂无播放歌曲',
+    artist: 'MUSE.AUDIO',
+    coverUrl: '',
+    duration: 0,
+    lyrics: '',
+  };
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -225,12 +235,16 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
       {/* Main Body: Artwork + Track details + Controls */}
       <div className="flex items-center gap-3 pt-2.5">
         {/* Cover Art with Vinyl Spin */}
-        <div className="relative w-14 h-14 flex-shrink-0 rounded-2xl overflow-hidden shadow-md border border-white/15">
-          <ImageWithFallback
-            src={normalizeCoverUrl(track.coverUrl)}
-            alt={track.title}
-            className={`w-full h-full object-cover ${isPlaying ? 'animate-[spin_10s_linear_infinite]' : ''}`}
-          />
+        <div className="relative w-14 h-14 flex-shrink-0 rounded-2xl overflow-hidden shadow-md border border-white/15 bg-slate-900/60 flex items-center justify-center">
+          {displayTrack.coverUrl ? (
+            <ImageWithFallback
+              src={normalizeCoverUrl(displayTrack.coverUrl)}
+              alt={displayTrack.title}
+              className={`w-full h-full object-cover ${isPlaying ? 'animate-[spin_10s_linear_infinite]' : ''}`}
+            />
+          ) : (
+            <Disc3 className={`w-7 h-7 text-slate-500 ${isPlaying ? 'animate-spin' : ''}`} />
+          )}
           <div className="absolute inset-0 bg-radial from-transparent to-black/40 pointer-events-none" />
         </div>
 
@@ -238,18 +252,20 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
         <div className="flex-1 min-w-0 space-y-1">
           <div className="flex items-center justify-between gap-1">
             <div className="min-w-0">
-              <div className="text-xs font-bold text-white truncate max-w-[170px]">{track.title}</div>
-              <div className="text-[11px] text-slate-400 truncate max-w-[170px]">{track.artist}</div>
+              <div className="text-xs font-bold text-white truncate max-w-[170px]">{displayTrack.title}</div>
+              <div className="text-[11px] text-slate-400 truncate max-w-[170px]">{displayTrack.artist}</div>
             </div>
-            <button
-              onClick={() => {
-                triggerHaptic('light');
-                onToggleFavorite(track);
-              }}
-              className="p-1 text-slate-400 hover:text-red-400 transition flex-shrink-0"
-            >
-              <Heart className={`w-3.5 h-3.5 ${isFavorite ? 'text-red-400 fill-red-400' : ''}`} />
-            </button>
+            {track && (
+              <button
+                onClick={() => {
+                  triggerHaptic('light');
+                  onToggleFavorite(track);
+                }}
+                className="p-1 text-slate-400 hover:text-red-400 transition flex-shrink-0"
+              >
+                <Heart className={`w-3.5 h-3.5 ${isFavorite ? 'text-red-400 fill-red-400' : ''}`} />
+              </button>
+            )}
           </div>
 
           {/* Real-time Scrolling Lyric */}
