@@ -100,9 +100,10 @@ export const DynamicIsland: React.FC<DynamicIslandProps> = ({
             setIsExpanded(true);
           }
         }}
-        className={`bg-black/95 text-white backdrop-blur-2xl border border-white/20 rounded-full shadow-[0_12px_40px_rgba(0,0,0,0.85)] cursor-pointer transition-all duration-300 overflow-hidden ${
+        className={`bg-black/95 text-white backdrop-blur-2xl border border-white/20 rounded-full shadow-[0_12px_40px_rgba(0,0,0,0.85)] cursor-pointer transition-all duration-300 overflow-hidden hover:border-emerald-400/40 ${
           isExpanded ? 'rounded-3xl p-4' : 'px-3.5 py-1.5'
         }`}
+        title={isExpanded ? '' : '点击展开灵动岛控制中心'}
       >
         {/* === Collapsed State === */}
         {!isExpanded && (

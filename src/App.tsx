@@ -1315,6 +1315,37 @@ export default function App() {
     );
   }
 
+  const isTauriDesktop = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+
+  // Desktop Mini Player Mode: Render full-bleed compact window when in Tauri
+  if (isTauriDesktop && isMiniPlayerOpen) {
+    return (
+      <div className="h-screen w-screen bg-[#08080c] text-slate-100 flex flex-col font-sans antialiased overflow-hidden select-none relative">
+        <MiniPlayer
+          isOpen={true}
+          onClose={() => setIsMiniPlayerOpen(false)}
+          track={currentTrack}
+          isPlaying={isPlaying}
+          isFavorite={currentTrack ? favorites.includes(currentTrack.id) : false}
+          duration={duration}
+          volume={volume}
+          isMuted={isMuted}
+          onTogglePlay={handleTogglePlay}
+          onPrev={handlePrev}
+          onNext={handleNext}
+          onSeek={handleSeek}
+          onVolumeChange={handleVolumeChange}
+          onToggleMute={handleToggleMute}
+          onToggleFavorite={handleToggleFavorite}
+          onOpenFullScreen={() => {
+            setIsMiniPlayerOpen(false);
+            setIsFullScreenPlayerOpen(true);
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen w-screen bg-[#08080c] text-slate-100 flex flex-col font-sans antialiased overflow-hidden select-none relative pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* Ambient Frosted Background Glowing Orbs */}

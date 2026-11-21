@@ -60,34 +60,37 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
   const currentTime = useAudioTime();
   const [isPinned, setIsPinned] = useState(true);
   const [showVolume, setShowVolume] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
   const [position, setPosition] = useState({ x: 24, y: 24 });
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef<{ mouseX: number; mouseY: number; startX: number; startY: number } | null>(null);
 
-  // Tauri window resizing & always-on-top integration
+  // Tauri desktop window resizing & always-on-top integration
   useEffect(() => {
+    const tauriAvailable = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+    setIsDesktop(tauriAvailable);
+
     if (!isOpen) return;
 
-    const adaptTauriWindow = async () => {
-      try {
-        if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
-          const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    if (tauriAvailable) {
+      import('@tauri-apps/api/window').then(async ({ getCurrentWindow, LogicalSize }) => {
+        try {
           const appWindow = getCurrentWindow();
           await appWindow.setAlwaysOnTop(isPinned);
-        }
-      } catch {
-        // Ignore Tauri window API if in browser
-      }
-    };
-
-    adaptTauriWindow();
+          await appWindow.setSize(new LogicalSize(380, 160));
+        } catch {}
+      });
+    }
 
     return () => {
-      if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
-        import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
-          const appWindow = getCurrentWindow();
-          appWindow.setAlwaysOnTop(false).catch(() => {});
-        }).catch(() => {});
+      if (tauriAvailable) {
+        import('@tauri-apps/api/window').then(async ({ getCurrentWindow, LogicalSize }) => {
+          try {
+            const appWindow = getCurrentWindow();
+            await appWindow.setAlwaysOnTop(false);
+            await appWindow.setSize(new LogicalSize(1200, 800));
+          } catch {}
+        });
       }
     };
   }, [isOpen, isPinned]);
@@ -155,17 +158,28 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
 
   return (
     <div
-      style={{
-        right: `${position.x}px`,
-        bottom: `${position.y}px`,
-      }}
-      onMouseDown={handleMouseDown}
-      className={`fixed z-[9990] w-[360px] bg-slate-950/90 text-white backdrop-blur-2xl border border-white/20 rounded-3xl shadow-[0_20px_60px_rgba(0,0,0,0.85)] p-3 select-none transition-shadow ${
-        isDragging ? 'shadow-2xl opacity-95 cursor-grabbing' : 'cursor-grab'
+      style={
+        isDesktop
+          ? undefined
+          : {
+              right: `${position.x}px`,
+              bottom: `${position.y}px`,
+            }
+      }
+      onMouseDown={isDesktop ? undefined : handleMouseDown}
+      className={`fixed z-[9990] bg-slate-950/95 text-white backdrop-blur-2xl select-none transition-shadow ${
+        isDesktop
+          ? 'inset-0 w-full h-full flex flex-col justify-between p-3.5 border-none'
+          : `w-[360px] border border-white/20 rounded-3xl shadow-[0_20px_60px_rgba(0,0,0,0.85)] p-3 ${
+              isDragging ? 'shadow-2xl opacity-95 cursor-grabbing' : 'cursor-grab'
+            }`
       }`}
     >
       {/* Top Header / Drag Strip */}
-      <div className="flex items-center justify-between px-1 pb-2 border-b border-white/10">
+      <div
+        data-tauri-drag-region
+        className="flex items-center justify-between px-1 pb-1.5 border-b border-white/10 cursor-move"
+      >
         <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400">
           <Move className="w-3.5 h-3.5 text-slate-500" />
           <span className="tracking-wide">MINI PLAYER</span>
