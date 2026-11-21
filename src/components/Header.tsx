@@ -61,7 +61,10 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="h-16 border-b border-white/10 bg-black/20 backdrop-blur-xl px-4 sm:px-8 flex items-center justify-between gap-4 select-none relative z-20">
+    <header
+      data-tauri-drag-region
+      className="h-16 border-b border-white/10 bg-black/20 backdrop-blur-xl px-4 sm:px-8 flex items-center justify-between gap-4 select-none relative z-20 cursor-default"
+    >
       {/* Search Input Box with Frosted Glass styling */}
       <div className="relative flex-1 max-w-md">
         <div className="relative flex items-center bg-white/5 border border-white/10 rounded-full px-3.5 py-1.5 backdrop-blur-md focus-within:border-emerald-400/50 focus-within:bg-white/10 transition shadow-inner">

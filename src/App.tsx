@@ -49,6 +49,9 @@ const SourceScriptManagerView = lazy(() => import('./components/SourceScriptMana
 const EqualizerModal = lazy(() => import('./components/EqualizerModal'));
 const DownloadModal = lazy(() => import('./components/DownloadModal'));
 const ImportPlaylistModal = lazy(() => import('./components/ImportPlaylistModal'));
+import { DynamicIsland } from './components/DynamicIsland';
+import { MiniPlayer } from './components/MiniPlayer';
+import { SongContextMenu, type ContextMenuPosition } from './components/SongContextMenu';
 import { LegalModal } from './components/LegalModal';
 import { UpdateModal } from './components/UpdateModal';
 import { checkForUpdates, type UpdateInfo } from './utils/updater';
@@ -370,6 +373,8 @@ export default function App() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isFullScreenPlayerOpen, setIsFullScreenPlayerOpen] = useState(false);
+  const [isMiniPlayerOpen, setIsMiniPlayerOpen] = useState(false);
+  const [contextMenuPos, setContextMenuPos] = useState<ContextMenuPosition | null>(null);
   const [isEQModalOpen, setIsEQModalOpen] = useState(false);
   const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState(false);
   const [isSleepTimerOpen, setIsSleepTimerOpen] = useState(false);
@@ -1193,7 +1198,13 @@ export default function App() {
         return;
       }
 
-      if (e.code === 'Space') {
+      if (e.key === 'Escape') {
+        setIsFullScreenPlayerOpen(false);
+        setIsMiniPlayerOpen(false);
+        setContextMenuPos(null);
+        setIsQueueDrawerOpen(false);
+        setIsEQModalOpen(false);
+      } else if (e.code === 'Space') {
         e.preventDefault();
         handleTogglePlayRef.current();
       } else if (e.code === 'ArrowLeft') {
@@ -1228,6 +1239,69 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // --- Global Song Context Menu Interceptor ---
+  useEffect(() => {
+    const handleContextMenu = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      // If user right-clicks on an editable field, preserve standard browser copy/paste
+      if (['INPUT', 'TEXTAREA'].includes(target.tagName) || target.isContentEditable) {
+        return;
+      }
+
+      // Check if clicked inside a track item
+      const trackElem = target.closest('[data-track-id]');
+      if (trackElem) {
+        e.preventDefault();
+        const trackId = trackElem.getAttribute('data-track-id');
+        const found =
+          tracks.find((t) => t.id === trackId) ||
+          queue.find((t) => t.id === trackId) ||
+          heroTracks.find((t) => t.id === trackId) ||
+          (currentTrack?.id === trackId ? currentTrack : null);
+        if (found) {
+          setContextMenuPos({ x: e.clientX, y: e.clientY, track: found });
+          return;
+        }
+      }
+
+      // Default: prevent ugly browser contextmenu in app
+      e.preventDefault();
+      setContextMenuPos(null);
+    };
+
+    window.addEventListener('contextmenu', handleContextMenu);
+    return () => window.removeEventListener('contextmenu', handleContextMenu);
+  }, [tracks, queue, heroTracks, currentTrack]);
+
+  // --- Desktop System Tray Events ---
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
+      let unlistenPlay: (() => void) | undefined;
+      let unlistenNext: (() => void) | undefined;
+
+      import('@tauri-apps/api/event')
+        .then(({ listen }) => {
+          listen('tray-play-pause', () => {
+            handleTogglePlayRef.current();
+          }).then((un) => {
+            unlistenPlay = un;
+          });
+
+          listen('tray-next', () => {
+            handleNextRef.current();
+          }).then((un) => {
+            unlistenNext = un;
+          });
+        })
+        .catch(() => {});
+
+      return () => {
+        unlistenPlay?.();
+        unlistenNext?.();
+      };
+    }
   }, []);
 
   if (!dataLoaded) {
@@ -1496,6 +1570,7 @@ export default function App() {
                 onOpenQueue={() => setIsQueueDrawerOpen(true)}
                 onOpenSleepTimer={() => setIsSleepTimerOpen(true)}
                 onOpenFullScreen={() => setIsFullScreenPlayerOpen(true)}
+                onOpenMiniPlayer={() => setIsMiniPlayerOpen(true)}
                 onOpenDownload={handleOpenDownload}
               />
               )}
@@ -1646,6 +1721,62 @@ export default function App() {
         onClose={() => setIsUpdateModalOpen(false)}
         updateInfo={updateInfo}
         isChecking={isCheckingUpdate}
+      />
+
+      {/* Dynamic Island (灵动岛胶囊 HUD) */}
+      <DynamicIsland
+        track={currentTrack}
+        isPlaying={isPlaying}
+        isFavorite={currentTrack ? favorites.includes(currentTrack.id) : false}
+        duration={duration}
+        onTogglePlay={handleTogglePlay}
+        onPrev={handlePrev}
+        onNext={handleNext}
+        onSeek={handleSeek}
+        onToggleFavorite={handleToggleFavorite}
+        onOpenFullScreen={() => setIsFullScreenPlayerOpen(true)}
+        disabled={isFullScreenPlayerOpen || isMiniPlayerOpen}
+      />
+
+      {/* Mini Player (电脑最小播放器) */}
+      <MiniPlayer
+        isOpen={isMiniPlayerOpen}
+        onClose={() => setIsMiniPlayerOpen(false)}
+        track={currentTrack}
+        isPlaying={isPlaying}
+        isFavorite={currentTrack ? favorites.includes(currentTrack.id) : false}
+        duration={duration}
+        volume={volume}
+        isMuted={isMuted}
+        onTogglePlay={handleTogglePlay}
+        onPrev={handlePrev}
+        onNext={handleNext}
+        onSeek={handleSeek}
+        onVolumeChange={handleVolumeChange}
+        onToggleMute={handleToggleMute}
+        onToggleFavorite={handleToggleFavorite}
+        onOpenFullScreen={() => setIsFullScreenPlayerOpen(true)}
+      />
+
+      {/* Custom Song Context Menu */}
+      <SongContextMenu
+        position={contextMenuPos}
+        isFavorite={contextMenuPos ? favorites.includes(contextMenuPos.track.id) : false}
+        onClose={() => setContextMenuPos(null)}
+        onPlay={handlePlayTrack}
+        onPlayNext={(track) => {
+          setQueue((prev) => {
+            const filtered = prev.filter((t) => t.id !== track.id);
+            return [track, ...filtered];
+          });
+        }}
+        onAddToQueue={handleAddToQueue}
+        onToggleFavorite={handleToggleFavorite}
+        onDownload={handleOpenDownload}
+        onSearchArtist={(artist) => {
+          setSearchQuery(artist);
+          navigate('/search');
+        }}
       />
 
       {/* Floating Download Toast / Queue Notification */}

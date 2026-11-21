@@ -12,9 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "muse-audio",
-        "width": 800,
-        "height": 600,
+        "title": "MUSE.AUDIO",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 880,
+        "minHeight": 580,
         "resizable": true,
         "fullscreen": false,
         "backgroundColor": "#08080c",

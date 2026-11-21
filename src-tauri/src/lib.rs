@@ -109,6 +109,85 @@ pub fn run() {
         ])
         .plugin(tauri_plugin_keepawake::init())
         .plugin(tauri_plugin_native_audio::init());
+    #[cfg(desktop)]
+    {
+        builder = builder.setup(|app| {
+            use tauri::Manager;
+            if let Some(icon) = app.default_window_icon() {
+                let toggle = tauri::menu::MenuItemBuilder::with_id("toggle", "显示 / 隐藏主窗口").build(app)?;
+                let play_pause = tauri::menu::MenuItemBuilder::with_id("play_pause", "播放 / 暂停").build(app)?;
+                let next = tauri::menu::MenuItemBuilder::with_id("next", "下一首").build(app)?;
+                let quit = tauri::menu::MenuItemBuilder::with_id("quit", "退出 MUSE.AUDIO").build(app)?;
+
+                let menu = tauri::menu::MenuBuilder::new(app)
+                    .item(&toggle)
+                    .separator()
+                    .item(&play_pause)
+                    .item(&next)
+                    .separator()
+                    .item(&quit)
+                    .build()?;
+
+                let _tray = tauri::tray::TrayIconBuilder::new()
+                    .icon(icon.clone())
+                    .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, event| {
+                        use tauri::Emitter;
+                        match event.id.as_ref() {
+                            "toggle" => {
+                                if let Some(win) = app.get_webview_window("main") {
+                                    if win.is_visible().unwrap_or(false) {
+                                        let _ = win.hide();
+                                    } else {
+                                        let _ = win.show();
+                                        let _ = win.set_focus();
+                                    }
+                                }
+                            }
+                            "play_pause" => {
+                                let _ = app.emit("tray-play-pause", ());
+                            }
+                            "next" => {
+                                let _ = app.emit("tray-next", ());
+                            }
+                            "quit" => {
+                                app.exit(0);
+                            }
+                            _ => {}
+                        }
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let tauri::tray::TrayIconEvent::Click {
+                            button: tauri::tray::MouseButton::Left,
+                            button_state: tauri::tray::MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            let app = tray.app_handle();
+                            if let Some(win) = app.get_webview_window("main") {
+                                if win.is_visible().unwrap_or(false) {
+                                    let _ = win.hide();
+                                } else {
+                                    let _ = win.show();
+                                    let _ = win.set_focus();
+                                }
+                            }
+                        }
+                    })
+                    .build(app)?;
+            }
+            Ok(())
+        });
+
+        // Close to tray on desktop
+        builder = builder.on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        });
+    }
     #[cfg(mobile)]
     {
         builder = builder.setup(|app| {

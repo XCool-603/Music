@@ -81,6 +81,7 @@ const TrackRowBase: React.FC<TrackRowProps> = ({
   if (variant === 'compact-card') {
     return (
       <div
+        data-track-id={track.id}
         className={`group relative shrink-0 w-40 snap-start cursor-pointer rounded-2xl p-3 transition ${
           isCurrent ? 'bg-indigo-500/15 ring-1 ring-indigo-400/40' : 'bg-white/5 hover:bg-white/10'
         }`}
@@ -117,6 +118,7 @@ const TrackRowBase: React.FC<TrackRowProps> = ({
 
   return (
     <div
+      data-track-id={track.id}
       className={`group relative grid grid-cols-[28px_40px_minmax(0,1fr)_auto] sm:grid-cols-[28px_40px_minmax(0,2fr)_minmax(0,1fr)_auto_auto] md:grid-cols-[28px_40px_minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,1fr)_auto_auto] items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition cursor-pointer ${
         isCurrent ? 'bg-indigo-500/15' : 'hover:bg-white/5'
       }`}

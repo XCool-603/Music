@@ -24,7 +24,9 @@ import {
   Activity,
   Music,
   Download,
+  PictureInPicture2,
 } from 'lucide-react';
+import { triggerHaptic } from '../utils/haptics';
 
 interface BottomPlayerBarProps {
   track: Track | null;
@@ -50,6 +52,7 @@ interface BottomPlayerBarProps {
   onOpenQueue: () => void;
   onOpenSleepTimer: () => void;
   onOpenFullScreen: () => void;
+  onOpenMiniPlayer?: () => void;
   onOpenDownload?: (track: Track) => void;
 }
 
@@ -81,6 +84,7 @@ const BottomPlayerBarInner: React.FC<BottomPlayerBarProps> = ({
   onOpenQueue,
   onOpenSleepTimer,
   onOpenFullScreen,
+  onOpenMiniPlayer,
   onOpenDownload,
 }) => {
   const currentTime = useAudioTime();
@@ -230,11 +234,11 @@ const BottomPlayerBarInner: React.FC<BottomPlayerBarProps> = ({
             <button onClick={onTogglePlaybackMode} className="p-1.5 text-slate-400 hover:text-white rounded-lg transition hidden sm:block" title={`模式: ${playbackMode}`}>
               {playbackMode === 'repeat-one' ? <Repeat1 className="w-4 h-4 text-emerald-400" /> : playbackMode === 'shuffle' ? <Shuffle className="w-4 h-4 text-emerald-400" /> : <Repeat className={`w-4 h-4 ${playbackMode === 'repeat-all' ? 'text-emerald-400' : ''}`} />}
             </button>
-            <button onClick={onPrev} className="p-1.5 text-slate-300 hover:text-white rounded-lg transition active:scale-90" title="上一首"><SkipBack className="w-5 h-5" /></button>
-            <button onClick={onTogglePlay} className="p-3 bg-white hover:bg-slate-100 text-black rounded-full shadow-lg shadow-white/15 transition transform hover:scale-105 active:scale-95 flex items-center justify-center font-bold" title={isPlaying ? '暂停' : '播放'}>
+            <button onClick={() => { triggerHaptic('light'); onPrev(); }} className="p-1.5 text-slate-300 hover:text-white rounded-lg transition active:scale-90" title="上一首"><SkipBack className="w-5 h-5" /></button>
+            <button onClick={() => { triggerHaptic('medium'); onTogglePlay(); }} className="p-3 bg-white hover:bg-slate-100 text-black rounded-full shadow-lg shadow-white/15 transition transform hover:scale-105 active:scale-95 flex items-center justify-center font-bold" title={isPlaying ? '暂停' : '播放'}>
               {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
             </button>
-            <button onClick={onNext} className="p-1.5 text-slate-300 hover:text-white rounded-lg transition active:scale-90" title="下一首"><SkipForward className="w-5 h-5" /></button>
+            <button onClick={() => { triggerHaptic('light'); onNext(); }} className="p-1.5 text-slate-300 hover:text-white rounded-lg transition active:scale-90" title="下一首"><SkipForward className="w-5 h-5" /></button>
             <button onClick={() => setShowMiniVisualizer(!showMiniVisualizer)} className={`p-1.5 rounded-lg transition hidden md:block ${showMiniVisualizer ? 'text-emerald-400 bg-white/10' : 'text-slate-400 hover:text-white'}`} title="实时音频波形"><Activity className="w-4 h-4" /></button>
           </div>
           <div className="hidden sm:flex items-center gap-2 text-[11px] font-mono text-slate-400 mt-1">
@@ -265,6 +269,18 @@ const BottomPlayerBarInner: React.FC<BottomPlayerBarProps> = ({
             />
           </div>
           <button onClick={onOpenQueue} className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/5 transition" title="播放队列"><ListMusic className="w-5 h-5" /></button>
+          {onOpenMiniPlayer && (
+            <button
+              onClick={() => {
+                triggerHaptic('light');
+                onOpenMiniPlayer();
+              }}
+              className="p-2 text-slate-400 hover:text-emerald-400 rounded-xl hover:bg-white/5 transition hidden sm:block"
+              title="电脑最小播放器 (迷你悬浮模式)"
+            >
+              <PictureInPicture2 className="w-5 h-5" />
+            </button>
+          )}
           <button onClick={onOpenFullScreen} className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/5 transition" title="沉浸式大屏歌词/唱片模式"><Maximize2 className="w-5 h-5" /></button>
         </div>
       </div>

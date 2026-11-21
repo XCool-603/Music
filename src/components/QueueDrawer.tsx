@@ -73,6 +73,7 @@ export const QueueDrawer: React.FC<QueueDrawerProps> = ({
               return (
                 <div
                   key={`${track.id}-${idx}`}
+                  data-track-id={track.id}
                   onClick={() => onSelectTrack(track)}
                   className={`group flex items-center justify-between p-2.5 rounded-xl cursor-pointer transition ${
                     isCurrent

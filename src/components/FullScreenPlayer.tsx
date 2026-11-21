@@ -5,6 +5,7 @@ import { VisualizerCanvas } from './VisualizerCanvas';
 import { formatTime } from '../utils/lyricsParser';
 import { ImageWithFallback } from './ImageWithFallback';
 import { normalizeCoverUrl } from '../utils/imageUtils';
+import { triggerHaptic } from '../utils/haptics';
 import { useAudioTime } from '../utils/timeStore';
 import confetti from 'canvas-confetti';
 import {
@@ -88,6 +89,24 @@ const FullScreenPlayerInner: React.FC<FullScreenPlayerProps> = ({
   const [visualizerMode, setVisualizerMode] = useState<VisualizerMode>('bars');
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubValue, setScrubValue] = useState(0);
+  const touchStartYRef = useRef<number | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      touchStartYRef.current = e.touches[0].clientY;
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartYRef.current !== null && e.changedTouches.length === 1) {
+      const deltaY = e.changedTouches[0].clientY - touchStartYRef.current;
+      if (deltaY > 80) {
+        triggerHaptic('light');
+        onClose();
+      }
+    }
+    touchStartYRef.current = null;
+  };
   const scrubInputRef = useRef<HTMLInputElement>(null);
 
   // Fix: listen for mouseup/touchend on document so scrubbing always resets,
@@ -123,7 +142,11 @@ const FullScreenPlayerInner: React.FC<FullScreenPlayerProps> = ({
   const progressPercent = duration > 0 ? (currentDisplayTime / duration) * 100 : 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[#08080c] text-slate-100 animate-in slide-in-from-bottom-5 duration-300 overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      className="fixed inset-0 z-50 flex flex-col bg-[#08080c] text-slate-100 animate-in slide-in-from-bottom-5 duration-300 overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
+    >
       {/* Background Dynamic Ambient Blur - reduced blur radius for GPU perf */}
       <div
         className="absolute inset-0 bg-cover bg-center blur-xl opacity-30 scale-125 transition-all duration-1000 -z-10"

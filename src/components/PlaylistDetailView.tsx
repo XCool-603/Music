@@ -182,6 +182,7 @@ export const PlaylistDetailView: React.FC<PlaylistDetailViewProps> = ({
               return (
                 <div
                   key={track.id}
+                  data-track-id={track.id}
                   onClick={() => onPlayTrack(track)}
                   className={`group flex items-center justify-between p-3 sm:px-5 hover:bg-neutral-800/60 transition cursor-pointer ${
                     isCurrent ? 'bg-indigo-600/10' : ''
