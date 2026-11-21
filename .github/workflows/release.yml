@@ -1,0 +1,557 @@
+# =============================================================================
+#  MUSE.AUDIO 全平台自动打包与 Release 发布流水线
+#
+#  触发条件:
+#    1. 推送以 'v' 开头的标签 (如 git push github v1.0.1)
+#    2. 手动在 GitHub Actions 页面选择 "Release" 点击 "Run workflow"
+#
+#  覆盖平台:
+#    - Windows  (x64 NSIS Setup .exe + MSI)
+#    - Android  (全架构 Universal Signed .apk)
+#    - HarmonyOS (鸿蒙 NEXT .hap)
+#    - Linux    (x86_64 .AppImage + .deb)
+#    - macOS    (Apple Silicon / Intel Universal .dmg)
+#    - iOS      (真机 .ipa)
+# =============================================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (例如 v1.0.1)'
+        required: false
+        default: 'v1.0.1'
+
+permissions:
+  contents: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Windows 打包 (NSIS Setup .exe + .msi)
+  # ---------------------------------------------------------------------------
+  build-windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Generate app icons from SVG
+        run: npm run icons
+
+      - name: Build Windows bundle (x64)
+        run: npm run build:win
+
+      - name: Prepare Windows release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-release
+          $tag = "${{ github.ref_name }}"
+          if (-not $tag -or $tag -eq "main") { $tag = "${{ inputs.tag_name }}" }
+          if (-not $tag) { $tag = "v1.0.1" }
+
+          $nsis = Get-ChildItem -Path "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe" | Select-Object -First 1
+          if ($nsis) {
+            Copy-Item $nsis.FullName -Destination "dist-release/MUSE.AUDIO_Windows_x64_Setup_${tag}.exe"
+            Write-Host "Prepared NSIS: MUSE.AUDIO_Windows_x64_Setup_${tag}.exe"
+          }
+          $msi = Get-ChildItem -Path "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi" | Select-Object -First 1
+          if ($msi) {
+            Copy-Item $msi.FullName -Destination "dist-release/MUSE.AUDIO_Windows_x64_${tag}.msi"
+            Write-Host "Prepared MSI: MUSE.AUDIO_Windows_x64_${tag}.msi"
+          }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: dist-release/*
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 2. Android 打包 (Universal APK)
+  # ---------------------------------------------------------------------------
+  build-android:
+    name: Android (Universal)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: |
+            aarch64-linux-android
+            armv7-linux-androideabi
+            i686-linux-android
+            x86_64-linux-android
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools build-tools;34.0.0 platforms;android-34'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Generate app icons from SVG
+        run: npm run icons
+
+      - name: Configure Android release signing
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            base64 -d <<< "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" > src-tauri/gen/android/app/muse-release.jks
+            printf '%s\n' \
+              "storeFile=muse-release.jks" \
+              "storePassword=${{ secrets.ANDROID_KEYSTORE_STORE_PASSWORD }}" \
+              "keyAlias=${{ secrets.ANDROID_KEYSTORE_KEY_ALIAS }}" \
+              "keyPassword=${{ secrets.ANDROID_KEYSTORE_KEY_PASSWORD }}" \
+              > src-tauri/gen/android/app/keystore.properties
+            echo "Release signing configured from GitHub Secrets."
+          else
+            echo "No keystore secrets configured, proceeding with default signing."
+          fi
+
+      - name: Build Android APK
+        run: |
+          npx tauri android build --apk || (echo "Retrying Android build in 10s..." && sleep 10 && npx tauri android build --apk)
+
+      - name: Prepare Android release asset
+        shell: bash
+        run: |
+          mkdir -p dist-release
+          TAG="${{ github.ref_name }}"
+          [ -z "$TAG" ] || [ "$TAG" = "main" ] && TAG="${{ inputs.tag_name }}"
+          [ -z "$TAG" ] && TAG="v1.0.1"
+
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name "*universal*.apk" | head -n 1)
+          if [ -z "$APK" ]; then
+            APK=$(find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" | head -n 1)
+          fi
+          if [ -n "$APK" ]; then
+            cp "$APK" "dist-release/MUSE.AUDIO_Android_Universal_${TAG}.apk"
+            echo "Prepared APK: dist-release/MUSE.AUDIO_Android_Universal_${TAG}.apk"
+          fi
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: dist-release/*
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 3. HarmonyOS 打包 (HAP)
+  # ---------------------------------------------------------------------------
+  build-harmony:
+    name: HarmonyOS (HAP)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+
+      - name: Setup HarmonyOS CLI tools & SDK
+        uses: ErBWs/setup-ohos@v2
+        with:
+          version: 5.0.13.200
+          cache: true
+
+      - name: Build HAP (release, unsigned)
+        working-directory: harmonyos
+        env:
+          npm_config_registry: https://repo.harmonyos.com/npm/
+        run: |
+          npm config set registry "https://repo.harmonyos.com/npm/" --global
+          hvigorw clean --no-daemon --accept-license
+          hvigorw assembleHap --mode module -p product=default -p buildMode=release --no-daemon --accept-license --stacktrace
+
+      - name: Prepare HarmonyOS release asset
+        shell: bash
+        run: |
+          mkdir -p dist-release
+          TAG="${{ github.ref_name }}"
+          [ -z "$TAG" ] || [ "$TAG" = "main" ] && TAG="${{ inputs.tag_name }}"
+          [ -z "$TAG" ] && TAG="v1.0.1"
+
+          HAP=$(find harmonyos/entry/build -name "*.hap" | head -n 1)
+          if [ -n "$HAP" ]; then
+            cp "$HAP" "dist-release/MUSE.AUDIO_HarmonyOS_${TAG}.hap"
+            echo "Prepared HAP: dist-release/MUSE.AUDIO_HarmonyOS_${TAG}.hap"
+          fi
+
+      - name: Upload HarmonyOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-harmonyos
+          path: dist-release/*
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 4. Linux 打包 (.AppImage + .deb)
+  # ---------------------------------------------------------------------------
+  build-linux:
+    name: Linux (deb + AppImage)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libgtk-3-dev \
+            patchelf
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Generate app icons from SVG
+        run: npm run icons
+
+      - name: Build Linux bundles (deb + AppImage)
+        run: npx tauri build --bundles deb appimage
+
+      - name: Prepare Linux release assets
+        shell: bash
+        run: |
+          mkdir -p dist-release
+          TAG="${{ github.ref_name }}"
+          [ -z "$TAG" ] || [ "$TAG" = "main" ] && TAG="${{ inputs.tag_name }}"
+          [ -z "$TAG" ] && TAG="v1.0.1"
+
+          APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name "*.AppImage" 2>/dev/null | head -n 1)
+          DEB=$(find src-tauri/target/release/bundle/deb -name "*.deb" 2>/dev/null | head -n 1)
+          if [ -n "$APPIMAGE" ]; then
+            cp "$APPIMAGE" "dist-release/MUSE.AUDIO_Linux_${TAG}.AppImage"
+            echo "Prepared AppImage: dist-release/MUSE.AUDIO_Linux_${TAG}.AppImage"
+          fi
+          if [ -n "$DEB" ]; then
+            cp "$DEB" "dist-release/MUSE.AUDIO_Linux_${TAG}_amd64.deb"
+            echo "Prepared DEB: dist-release/MUSE.AUDIO_Linux_${TAG}_amd64.deb"
+          fi
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: dist-release/*
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 5. macOS 打包 (Universal DMG)
+  # ---------------------------------------------------------------------------
+  build-macos:
+    name: macOS (Universal DMG)
+    runs-on: macos-latest
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: |
+            aarch64-apple-darwin
+            x86_64-apple-darwin
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Generate app icons from SVG
+        run: npm run icons
+
+      - name: Import Apple Developer certificate (signing)
+        if: env.APPLE_CERTIFICATE != ''
+        env:
+          KEYCHAIN_IMPORT: build.keychain
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "" "$KEYCHAIN_IMPORT"
+          security default-keychain -s "$KEYCHAIN_IMPORT"
+          security unlock-keychain -p "" "$KEYCHAIN_IMPORT"
+          security import certificate.p12 -k "$KEYCHAIN_IMPORT" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN_IMPORT"
+          security list-keychains -d user -s "$KEYCHAIN_IMPORT"
+
+      - name: Build app bundle (universal)
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "No Apple certificate configured -> using ad-hoc signing"
+            export APPLE_SIGNING_IDENTITY="-"
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD
+          fi
+          npm run build:mac
+
+      - name: Prepare macOS release asset
+        shell: bash
+        run: |
+          mkdir -p dist-release
+          TAG="${{ github.ref_name }}"
+          [ -z "$TAG" ] || [ "$TAG" = "main" ] && TAG="${{ inputs.tag_name }}"
+          [ -z "$TAG" ] && TAG="v1.0.1"
+
+          DMG=$(find src-tauri/target/universal-apple-darwin/release/bundle -name "*.dmg" 2>/dev/null | head -n 1)
+          if [ -n "$DMG" ]; then
+            cp "$DMG" "dist-release/MUSE.AUDIO_macOS_Universal_${TAG}.dmg"
+            echo "Prepared DMG: dist-release/MUSE.AUDIO_macOS_Universal_${TAG}.dmg"
+          fi
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: dist-release/*
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 6. iOS 打包 (.ipa)
+  # ---------------------------------------------------------------------------
+  build-ios:
+    name: iOS (.ipa)
+    runs-on: macos-latest
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_PROFILE: ${{ secrets.APPLE_PROFILE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: |
+            aarch64-apple-ios
+            aarch64-apple-ios-sim
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Generate app icons from SVG
+        run: npm run icons
+
+      - name: Generate Xcode project
+        run: npx tauri ios init --ci
+
+      - name: Import signing certificate & profile (if provided)
+        if: env.APPLE_CERTIFICATE != ''
+        env:
+          RUNNER_TMP: ${{ runner.temp }}
+        run: |
+          set -e
+          CERT_PATH="$RUNNER_TMP/certificate.p12"
+          PROFILE_PATH="$RUNNER_TMP/profile.mobileprovision"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+          echo "$APPLE_PROFILE" | base64 --decode > "$PROFILE_PATH"
+          KEYCHAIN_PATH="$RUNNER_TMP/build.keychain"
+          security create-keychain -p "" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security unlock-keychain -p "" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN_PATH"
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp "$PROFILE_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/
+
+      - name: Build iOS device .ipa
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            npx tauri ios build --ci
+          else
+            npx tauri ios build --ci --no-sign
+          fi
+
+      - name: Prepare iOS release asset
+        shell: bash
+        run: |
+          mkdir -p dist-release
+          TAG="${{ github.ref_name }}"
+          [ -z "$TAG" ] || [ "$TAG" = "main" ] && TAG="${{ inputs.tag_name }}"
+          [ -z "$TAG" ] && TAG="v1.0.1"
+
+          IPA=$(find src-tauri/gen/apple/build -name "*.ipa" 2>/dev/null | head -n 1)
+          if [ -n "$IPA" ]; then
+            cp "$IPA" "dist-release/MUSE.AUDIO_iOS_${TAG}.ipa"
+            echo "Prepared IPA: dist-release/MUSE.AUDIO_iOS_${TAG}.ipa"
+          fi
+
+      - name: Upload iOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-ios
+          path: dist-release/*
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 7. 汇总发布到 GitHub Release
+  # ---------------------------------------------------------------------------
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - build-windows
+      - build-android
+      - build-harmony
+      - build-linux
+      - build-macos
+      - build-ios
+    # 只要有核心平台构建成功就允许发布已产出的安装包
+    if: always() && !cancelled() && (needs.build-windows.result == 'success' || needs.build-android.result == 'success' || needs.build-harmony.result == 'success')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: List collected release assets
+        run: |
+          echo "=== Collected Release Assets ==="
+          ls -lh release-assets/ || true
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [ -z "$TAG" ] || [ "$TAG" = "main" ]; then
+            TAG="${{ inputs.tag_name }}"
+          fi
+          if [ -z "$TAG" ]; then
+            TAG="v1.0.1"
+          fi
+
+          echo "Target Release Tag: $TAG"
+
+          shopt -s nullglob
+          ASSETS=(release-assets/*)
+          if [ ${#ASSETS[@]} -eq 0 ]; then
+            echo "::error::No release assets collected, aborting release creation."
+            exit 1
+          fi
+
+          TITLE="MUSE.AUDIO ${TAG} 全平台正式版"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, uploading new/updated assets..."
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            echo "Creating new release $TAG..."
+            gh release create "$TAG" release-assets/* \
+              --title "$TITLE" \
+              --generate-notes
+          fi
+
+          echo "Successfully published release for $TAG!"
